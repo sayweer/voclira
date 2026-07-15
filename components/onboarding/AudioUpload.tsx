@@ -5,7 +5,6 @@ import { Upload } from 'lucide-react'
 import { useLanguage } from '@/components/LanguageProvider'
 
 interface AudioUploadProps {
-  multiple: boolean
   /** Recommended minimum total duration in seconds; a soft warning shows below it. */
   minDurationSec: number
   onFiles: (files: File[], totalDurationSec: number) => void
@@ -39,8 +38,8 @@ function formatDuration(totalSec: number): string {
   return `${sec}sn`
 }
 
-/** File picker for pre-recorded audio. Used by IVC (single) and PVC (multiple files). */
-export function AudioUpload({ multiple, minDurationSec, onFiles }: AudioUploadProps) {
+/** File picker for a pre-recorded reference sample (single file, converted to WAV on upload). */
+export function AudioUpload({ minDurationSec, onFiles }: AudioUploadProps) {
   const { t } = useLanguage()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [selected, setSelected] = useState<{ count: number; duration: number } | null>(null)
@@ -63,7 +62,6 @@ export function AudioUpload({ multiple, minDurationSec, onFiles }: AudioUploadPr
         ref={inputRef}
         type="file"
         accept="audio/*"
-        multiple={multiple}
         onChange={handleChange}
         className="hidden"
       />
@@ -73,7 +71,7 @@ export function AudioUpload({ multiple, minDurationSec, onFiles }: AudioUploadPr
         className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-dashed border-border bg-background hover:border-primary/50 transition-all text-sm text-muted-foreground"
       >
         <Upload className="w-4 h-4" />
-        {multiple ? t('onboarding.uploadCtaMulti') : t('onboarding.uploadCta')}
+        {t('onboarding.uploadCta')}
       </button>
 
       {selected && (
@@ -85,7 +83,9 @@ export function AudioUpload({ multiple, minDurationSec, onFiles }: AudioUploadPr
         </p>
       )}
       {belowMin && (
-        <p className="text-xs text-amber-400 text-center">{t('onboarding.uploadDurationWarn')}</p>
+        <p className="text-xs text-amber-400 text-center">
+          {t('onboarding.uploadDurationWarn', { minSeconds: minDurationSec })}
+        </p>
       )}
     </div>
   )

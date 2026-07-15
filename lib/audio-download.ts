@@ -8,8 +8,19 @@ export function audioSrcFromStored(stored: string): string {
 interface DownloadOptions {
     base64?: string
     url?: string
+    /** Base file name WITHOUT extension — the extension is derived from the audio's MIME type. */
     filename: string
     mimeType?: string
+}
+
+/** Generated audio is WAV (Chatterbox) or MP3 (legacy base64) — never trust a hardcoded extension. */
+function extensionForMime(mime: string): string {
+    if (mime.includes('wav')) return 'wav'
+    if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3'
+    if (mime.includes('mp4')) return 'm4a'
+    if (mime.includes('ogg')) return 'ogg'
+    if (mime.includes('webm')) return 'webm'
+    return 'mp3'
 }
 
 function isIOSSafari(): boolean {
@@ -87,14 +98,17 @@ export async function downloadAudio(opts: DownloadOptions): Promise<DownloadResu
         return 'failed'
     }
 
+    const effectiveMime = blob.type || mimeType
+    const filename = `${opts.filename}.${extensionForMime(effectiveMime)}`
+
     // iOS Safari: <a download> is ignored on blob/data URLs. The only reliable
     // path is Web Share API → user picks "Save to Files" / AirDrop / Messages.
     if (isIOSSafari()) {
         const shareFn = typeof navigator !== 'undefined' ? navigator.share : undefined
         const canShareFn = typeof navigator !== 'undefined' ? navigator.canShare : undefined
         if (typeof shareFn === 'function') {
-            const file = new File([blob], opts.filename, { type: mimeType })
-            const shareData: ShareData = { files: [file], title: opts.filename }
+            const file = new File([blob], filename, { type: effectiveMime })
+            const shareData: ShareData = { files: [file], title: filename }
             const canShare = typeof canShareFn === 'function' ? canShareFn.call(navigator, shareData) : true
             if (canShare) {
                 try {
@@ -110,7 +124,7 @@ export async function downloadAudio(opts: DownloadOptions): Promise<DownloadResu
         }
     }
 
-    if (triggerAnchorDownload(blob, opts.filename)) {
+    if (triggerAnchorDownload(blob, filename)) {
         return 'downloaded'
     }
 

@@ -21,23 +21,10 @@ export function isValidTxSignature(signature: string): boolean {
   return BASE58_REGEX.test(signature)
 }
 
-/** Minimum price: 0.01 SOL */
-export const MIN_PRICE_LAMPORTS = 10_000_000
-
-/** Maximum price: 0.1 SOL */
-export const MAX_PRICE_LAMPORTS = 100_000_000
-
 /**
- * Validates that a price is within acceptable range.
+ * Validates that a price is within acceptable range (bounds live in lib/limits.ts).
  */
-export function isValidPrice(lamports: number): boolean {
-  return (
-    typeof lamports === 'number' &&
-    Number.isFinite(lamports) &&
-    lamports >= MIN_PRICE_LAMPORTS &&
-    lamports <= MAX_PRICE_LAMPORTS
-  )
-}
+export { isValidPriceLamports as isValidPrice } from '@/lib/limits'
 
 /**
  * Safely parse JSON body from a request.

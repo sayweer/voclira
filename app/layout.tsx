@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { cookies } from 'next/headers'
 import { Fraunces } from 'next/font/google'
 import localFont from 'next/font/local'
 import './globals.css'
@@ -37,7 +38,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: 'cover',
 }
 
@@ -46,11 +46,13 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  // Set by LanguageProvider's setLanguage — lets SSR emit the right lang + copy.
+  const lang = cookies().get('voclira_lang')?.value === 'tr' ? 'tr' : 'en'
   return (
-    <html lang="en" className={`dark ${geistSans.variable} ${geistMono.variable} ${fraunces.variable}`}>
+    <html lang={lang} className={`dark ${geistSans.variable} ${geistMono.variable} ${fraunces.variable}`}>
       <body className="font-sans antialiased">
         <WalletProviderDynamic>
-          <LanguageProvider>
+          <LanguageProvider initialLanguage={lang}>
             <LangSync />
             {children}
           </LanguageProvider>

@@ -5,8 +5,7 @@ import { Mic, Check, RotateCw } from 'lucide-react'
 import { useVoiceRecorder } from '@/lib/useVoiceRecorder'
 import { useLanguage } from '@/components/LanguageProvider'
 import { translations } from '@/lib/translations'
-
-const CONSENT_MIN_SECONDS = 3
+import { CONSENT } from '@/lib/limits'
 
 interface ConsentStepProps {
   language: 'en' | 'tr'
@@ -35,17 +34,20 @@ export function ConsentStep({
   const consentScript = translations[language].onboarding.consentScript
   const { isRecording, seconds, blob, error, start, stop, reset } = useVoiceRecorder()
 
-  // Lift the recorded blob to the parent once recording stops.
+  // Lift the recorded blob to the parent once recording stops — but only when it
+  // meets the minimum length. Short recordings stay local so the Continue button
+  // (gated on the parent's consentBlob) cannot proceed with an unverifiable sample.
   useEffect(() => {
-    if (blob) onConsentRecorded(blob)
-  }, [blob, onConsentRecorded])
+    if (!blob) return
+    onConsentRecorded(seconds >= CONSENT.MIN_SECONDS ? blob : null)
+  }, [blob, seconds, onConsentRecorded])
 
   const handleMicClick = () => {
     if (isRecording) {
       stop()
       return
     }
-    if (consentBlob) {
+    if (blob || consentBlob) {
       // Re-record: clear both local and parent state, then start fresh.
       reset()
       onConsentRecorded(null)
@@ -53,7 +55,7 @@ export function ConsentStep({
     void start()
   }
 
-  const tooShort = consentBlob !== null && seconds > 0 && seconds < CONSENT_MIN_SECONDS
+  const tooShort = blob !== null && seconds > 0 && seconds < CONSENT.MIN_SECONDS
 
   return (
     <div className="space-y-4">
@@ -83,7 +85,7 @@ export function ConsentStep({
         >
           {isRecording ? (
             <><Mic className="w-4 h-4" /> {t('onboarding.consentRecordStop')} · {seconds}s</>
-          ) : consentBlob ? (
+          ) : blob || consentBlob ? (
             <><RotateCw className="w-4 h-4" /> {t('onboarding.consentReRecord')}</>
           ) : (
             <><Mic className="w-4 h-4" /> {t('onboarding.consentRecordCta')}</>

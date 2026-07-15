@@ -80,6 +80,16 @@ export async function privateObjectExists(objectKey: string): Promise<boolean> {
     }
 }
 
+/** Returns a private object's size in bytes, or null if it doesn't exist. */
+export async function getPrivateObjectSize(objectKey: string): Promise<number | null> {
+    try {
+        const res = await r2().send(new HeadObjectCommand({ Bucket: PRIVATE_BUCKET(), Key: objectKey }))
+        return res.ContentLength ?? 0
+    } catch {
+        return null
+    }
+}
+
 /** Uploads a fan output to the PUBLIC bucket and returns its permanent public URL. */
 export async function uploadPublicObject(
     objectKey: string,

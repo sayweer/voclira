@@ -9,6 +9,7 @@ import { consumeSession } from '@/lib/session'
 import { getErrorResponse, UnsafeContentError, TtsError } from '@/lib/errors'
 import { safeParseJson, isValidWalletAddress, isValidTxSignature, getClientIp } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { priceUnitsFor, platformFeeLamports } from '@/lib/limits'
 import type { GenerateVoiceRequest } from '@/types'
 
 // Fal warm pool returns in 2-5s; fail fast rather than burn provisioned memory / show a long spinner.
@@ -108,16 +109,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     validateTextLengthForLanguage(fanText, language)
 
-    await verifyTransaction(txSignature, creatorWallet, creator.price_lamports, buyerWallet)
+    // Multi-unit pricing: the fan pays ceil(len / UNIT_CHARS) × unit price —
+    // the exact formula the client uses, so the on-chain amount is enforced
+    // and the recorded amount matches what was actually paid.
+    const expectedTotalLamports = priceUnitsFor(fanText) * creator.price_lamports
+    await verifyTransaction(txSignature, creatorWallet, expectedTotalLamports, buyerWallet)
 
-    const platformFeeLamports = Math.floor(creator.price_lamports * 0.1)
     const purchase = await savePurchase({
       buyerWallet,
       creatorWallet,
       txSignature,
       fanText,
-      amountLamports: creator.price_lamports,
-      platformFeeLamports,
+      amountLamports: expectedTotalLamports,
+      platformFeeLamports: platformFeeLamports(expectedTotalLamports),
     })
 
     // Purchase row now exists ('pending'). Any failure below transitions it to

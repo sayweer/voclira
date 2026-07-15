@@ -47,20 +47,12 @@ export default function PlayScreen({ purchase, creatorName }: PlayScreenProps) {
     const isUrl = /^https?:\/\//.test(stored);
     const result = await downloadAudio({
       ...(isUrl ? { url: stored } : { base64: stored }),
-      filename: `voice-message-${purchase.id.slice(0, 8)}.mp3`,
+      filename: `voice-message-${purchase.id.slice(0, 8)}`,
     });
     if (result === 'opened-new-tab') {
-      setDownloadHint(
-        language === 'tr'
-          ? 'Sesi yeni sekmede açtık. Dosyaya uzun basıp "Ses dosyasını kaydet" deyin.'
-          : 'Opened the audio in a new tab. Long-press the file and choose "Save audio".'
-      );
+      setDownloadHint(t('download.openedNewTabHint'));
     } else if (result === 'failed') {
-      setDownloadHint(
-        language === 'tr'
-          ? 'İndirme başarısız oldu. Ses oynatıcısından doğrudan dinleyebilirsiniz.'
-          : 'Download failed. You can still play the audio above.'
-      );
+      setDownloadHint(t('download.failedHint'));
     }
   };
 
@@ -212,6 +204,7 @@ export default function PlayScreen({ purchase, creatorName }: PlayScreenProps) {
       case 'completed': return t('play.statusSuccess');
       case 'rejected': return t('play.statusRejectedWithSafety');
       case 'refunded': return t('play.statusRefunded');
+      case 'failed': return t('play.statusFailed');
       default: return t('play.statusPending');
     }
   };
@@ -255,11 +248,13 @@ export default function PlayScreen({ purchase, creatorName }: PlayScreenProps) {
               purchase.status === 'completed' ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/25' :
               purchase.status === 'rejected' ? 'bg-rose-600/10 text-rose-700 border-rose-600/25' :
               purchase.status === 'refunded' ? 'bg-amber-600/10 text-amber-700 border-amber-600/25' :
+              purchase.status === 'failed' ? 'bg-orange-600/10 text-orange-700 border-orange-600/25' :
               'bg-sky-600/10 text-sky-700 border-sky-600/25'
             }`}>
               {purchase.status === 'completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
               {purchase.status === 'rejected' && <XCircle className="w-3.5 h-3.5" />}
               {purchase.status === 'refunded' && <HelpCircle className="w-3.5 h-3.5" />}
+              {purchase.status === 'failed' && <AlertCircle className="w-3.5 h-3.5" />}
               {purchase.status === 'pending' && <Clock className="w-3.5 h-3.5 animate-pulse" />}
               <span>{statusLabel(purchase.status)}</span>
             </div>
@@ -334,6 +329,11 @@ export default function PlayScreen({ purchase, creatorName }: PlayScreenProps) {
                 <span className="font-bold block text-rose-700 mb-0.5">{t('play.statusRejectedReason')}</span>
                 <span className="italic">{purchase.rejection_reason || t('play.statusRejectedDesc')}</span>
               </div>
+            </div>
+          ) : purchase.status === 'failed' ? (
+            <div className="flex items-start gap-2.5 p-3.5 bg-orange-600/10 border border-orange-600/25 rounded-lg text-orange-700 text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 text-orange-700 mt-0.5" />
+              <span>{t('play.statusFailedDesc')}</span>
             </div>
           ) : purchase.status === 'pending' ? (
             <div className="flex items-center gap-3 p-3.5 bg-sky-600/10 border border-sky-600/25 rounded-lg text-sky-700 text-xs">

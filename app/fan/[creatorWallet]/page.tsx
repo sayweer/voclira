@@ -18,6 +18,7 @@ import LanguageToggle from '@/components/LanguageToggle'
 import { BrandLogo } from '@/components/BrandLogo'
 import { WavePath } from '@/components/ui/wave-path'
 import { downloadAudio, audioSrcFromStored } from '@/lib/audio-download'
+import { TEXT, PRICING, maxTextLengthFor, priceUnitsFor, platformFeeLamports } from '@/lib/limits'
 import type { SupportedLanguage } from '@/types'
 
 interface Creator {
@@ -37,7 +38,7 @@ export default function FanPage() {
   const params = useParams()
   const creatorWallet = params.creatorWallet as string
   const { publicKey, sendTransaction, connected } = useWallet()
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
 
   const [creator, setCreator] = useState<Creator | null>(null)
   const [loading, setLoading] = useState(true)
@@ -64,16 +65,17 @@ export default function FanPage() {
           setCreator(data)
           if (!languagePicked.current) setSelectedLanguage(data.language === 'tr' ? 'tr' : 'en')
         } else {
-          setError(res.status === 404 ? t('fan.creatorNotFound') : (language === 'tr' ? 'Yaratıcı yüklenemedi' : 'Failed to load creator'))
+          setError(res.status === 404 ? t('fan.creatorNotFound') : t('fan.loadFailed'))
         }
       } catch {
-        setError(language === 'tr' ? 'Ağ hatası — lütfen tekrar deneyin' : 'Network error — please try again')
+        setError(t('fan.networkError'))
       } finally {
         setLoading(false)
       }
     }
     fetchCreator()
-  }, [creatorWallet, t, language])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creatorWallet])
 
   // Fetch platform wallet on mount
   useEffect(() => {
@@ -92,15 +94,19 @@ export default function FanPage() {
     fetchPlatformConfig()
   }, [])
 
-  // Price calculation — charUnits is 0 when message is empty
-  const charUnits = message.length > 0 ? Math.ceil(message.length / 150) : 0
+  // Language-dependent limits + price calculation — single source: lib/limits.ts
+  const maxLen = maxTextLengthFor(selectedLanguage)
+  const overLimit = message.length > maxLen
+  const tooShort = message.trim().length > 0 && message.trim().length < TEXT.MIN_LENGTH
+  const charUnits = priceUnitsFor(message)
   const totalLamports = charUnits * (creator?.price_lamports ?? 0)
   const totalSol = (totalLamports / LAMPORTS_PER_SOL).toFixed(4)
   const pricePerUnit = ((creator?.price_lamports ?? 0) / LAMPORTS_PER_SOL).toFixed(4)
 
-  // Pay and generate
+  // Pay and generate — moderation runs BEFORE the wallet opens, so rejected
+  // or over-limit text never costs the fan anything.
   const handlePayAndGenerate = async () => {
-    if (!publicKey || !creator || !message.trim()) return
+    if (!publicKey || !creator || !message.trim() || tooShort || overLimit) return
     if (!platformWallet) {
       setError(t('fan.configNotLoaded'))
       return
@@ -112,13 +118,39 @@ export default function FanPage() {
     setDownloadHint(null)
 
     try {
+      const buyerWallet = publicKey.toBase58()
+
+      // 1) Pre-payment moderation — binds the approved text to the generate call.
+      const modRes = await fetch('/api/moderate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatorWallet,
+          buyerWallet,
+          text: message,
+          language: selectedLanguage,
+        }),
+      })
+      const modData = await modRes.json()
+      if (!modRes.ok) {
+        setError(
+          modData.code === 'UNSAFE_CONTENT'
+            ? t('fan.contentRejected')
+            : modData.error ?? t('fan.generationFailed')
+        )
+        return
+      }
+      const moderationSessionId =
+        typeof modData.moderationSessionId === 'string' ? modData.moderationSessionId : null
+
+      // 2) On-chain payment
       const connection = new Connection(
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com',
         'confirmed'
       )
 
       // Split payment: 90% to creator, 10% platform fee
-      const platformFee = Math.floor(totalLamports * 0.1)
+      const platformFee = platformFeeLamports(totalLamports)
       const creatorAmount = totalLamports - platformFee
 
       // Build transaction with two transfers
@@ -146,23 +178,35 @@ export default function FanPage() {
       // Wait for confirmation
       await connection.confirmTransaction(signature, 'confirmed')
 
-      // Generate voice
-      const res = await fetch('/api/voice/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          creatorWallet,
-          fanText: message,
-          txSignature: signature,
-          buyerWallet: publicKey.toBase58(),
-          language: selectedLanguage,
-        }),
-      })
+      // 3) Generate. If the one-time moderation session was already consumed
+      // (e.g. an earlier attempt), retry once WITHOUT it — generate re-moderates anyway.
+      const generateOnce = async (sessionId: string | null) => {
+        const res = await fetch('/api/voice/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            creatorWallet,
+            fanText: message,
+            txSignature: signature,
+            buyerWallet,
+            language: selectedLanguage,
+            ...(sessionId ? { moderationSessionId: sessionId } : {}),
+          }),
+        })
+        return { res, data: await res.json() }
+      }
 
-      const data = await res.json()
+      let { res, data } = await generateOnce(moderationSessionId)
+      if (res.status === 409 && data.code === 'MOD_SESSION_INVALID') {
+        ;({ res, data } = await generateOnce(null))
+      }
 
       if (!res.ok) {
-        setError(data.error ?? (language === 'tr' ? 'Ses üretimi başarısız oldu' : 'Generation failed'))
+        setError(
+          data.refundNeeded
+            ? t('fan.rejectedAfterPayment', { tx: `${signature.slice(0, 12)}…` })
+            : data.error ?? t('fan.generationFailed')
+        )
         return
       }
 
@@ -172,7 +216,7 @@ export default function FanPage() {
       setPurchaseId(typeof data.purchaseId === 'string' ? data.purchaseId : null)
       setTxSignature(null)
     } catch (err: unknown) {
-      const errMessage = err instanceof Error ? err.message : (language === 'tr' ? 'Ödeme başarısız oldu' : 'Payment failed')
+      const errMessage = err instanceof Error ? err.message : t('fan.paymentFailed')
       setError(errMessage)
     } finally {
       setIsPaying(false)
@@ -184,20 +228,12 @@ export default function FanPage() {
     setDownloadHint(null)
     const result = await downloadAudio({
       url: audioDownloadUrl,
-      filename: 'voice-message.mp3',
+      filename: 'voice-message',
     })
     if (result === 'opened-new-tab') {
-      setDownloadHint(
-        language === 'tr'
-          ? 'Sesi yeni sekmede açtık. Dosyaya uzun basıp "Ses dosyasını kaydet" deyin.'
-          : 'Opened the audio in a new tab. Long-press the file and choose "Save audio".'
-      )
+      setDownloadHint(t('download.openedNewTabHint'))
     } else if (result === 'failed') {
-      setDownloadHint(
-        language === 'tr'
-          ? 'İndirme başarısız oldu. Ses oynatıcısından doğrudan dinleyebilirsiniz.'
-          : 'Download failed. You can still play the audio above.'
-      )
+      setDownloadHint(t('download.failedHint'))
     }
   }
 
@@ -265,7 +301,7 @@ export default function FanPage() {
                   <span
                     className="w-1.5 h-1.5 rounded-full bg-voclira-olive animate-pulse"
                   />
-                  {t('fan.pricePer150Chars', { price: pricePerUnit })}
+                  {t('fan.pricePer150Chars', { price: pricePerUnit, unitChars: PRICING.UNIT_CHARS })}
                 </div>
               </div>
 
@@ -277,19 +313,30 @@ export default function FanPage() {
                   <textarea
                     id="fan-message"
                     value={message}
-                    onChange={(e) => setMessage(e.target.value.slice(0, 300))}
+                    onChange={(e) => setMessage(e.target.value)}
+                    maxLength={maxLen}
+                    disabled={isPaying}
                     placeholder={t('fan.typeMessagePlaceholder')}
                     rows={4}
-                    className="w-full resize-none rounded-xl px-4 pt-4 pb-2 text-sm text-voclira-night placeholder:text-voclira-burgundy/40 bg-transparent outline-none focus:outline-none"
+                    className="w-full resize-none rounded-xl px-4 pt-4 pb-2 text-sm text-voclira-night placeholder:text-voclira-burgundy/40 bg-transparent outline-none focus:outline-none disabled:opacity-60"
                   />
                   <div className="flex justify-end px-4 pb-3">
                     <span
-                      className={`text-xs ${message.length >= 270 ? 'text-red-600' : 'text-voclira-burgundy/50'}`}
+                      className={`text-xs ${overLimit || maxLen - message.length <= 30 ? 'text-red-600' : 'text-voclira-burgundy/50'}`}
                     >
-                      {message.length}/300
+                      {message.length}/{maxLen}
                     </span>
                   </div>
                 </div>
+
+                {/* Length validation hints — mirror the server rules so nothing fails after payment */}
+                {(overLimit || tooShort) && (
+                  <p className="text-xs text-red-600 -mt-2 px-1">
+                    {overLimit
+                      ? t('fan.overLimit', { max: maxLen })
+                      : t('fan.tooShort', { min: TEXT.MIN_LENGTH })}
+                  </p>
+                )}
 
                 {/* Generation language selector — defaults to the creator's language */}
                 <div className="flex flex-col gap-2">
@@ -303,11 +350,12 @@ export default function FanPage() {
                         <button
                           key={opt.id}
                           type="button"
+                          disabled={isPaying}
                           onClick={() => {
                             languagePicked.current = true
                             setSelectedLanguage(opt.id)
                           }}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
                             active
                               ? 'bg-voclira-olive border-voclira-olive text-voclira-cream shadow-[0_2px_12px_rgba(96,116,86,0.35)]'
                               : 'bg-voclira-paper border-voclira-burgundy/20 text-voclira-burgundy/70 hover:border-voclira-burgundy/40'
@@ -348,8 +396,8 @@ export default function FanPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-voclira-burgundy/60">
                         {charUnits > 0
-                          ? t('fan.priceUnitLabel', { units: charUnits, plural: charUnits !== 1 ? 's' : '', price: pricePerUnit })
-                          : t('fan.priceLabel', { price: pricePerUnit })}
+                          ? t('fan.priceUnitLabel', { units: charUnits, price: pricePerUnit })
+                          : t('fan.priceLabel', { price: pricePerUnit, unitChars: PRICING.UNIT_CHARS })}
                       </span>
                     </div>
                     <div className="font-display font-bold text-base text-voclira-terracotta">
@@ -361,7 +409,7 @@ export default function FanPage() {
                   <motion.button
                     id="pay-and-generate-btn"
                     onClick={handlePayAndGenerate}
-                    disabled={!message.trim() || isPaying}
+                    disabled={!message.trim() || tooShort || overLimit || isPaying}
                     whileTap={{ scale: 0.98 }}
                     className="w-full rounded-xl py-3.5 px-6 font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 bg-voclira-burgundy text-voclira-cream shadow-[0_4px_20px_rgba(123,37,37,0.35)] hover:bg-voclira-burgundy/90 disabled:bg-voclira-burgundy/30 disabled:shadow-none disabled:cursor-not-allowed"
                   >

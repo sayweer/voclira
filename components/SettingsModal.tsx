@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { SlideButton } from '@/components/ui/slide-button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/components/LanguageProvider';
+import { PRICING } from '@/lib/limits';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,7 +23,7 @@ interface SettingsModalProps {
   blockProfanity: boolean;
   blockPolitical: boolean;
   onFilterUpdate: (key: 'blockAdult' | 'blockProfanity' | 'blockPolitical', value: boolean) => void;
-  voiceId: string | null;
+  hasVoice: boolean;
   onDeleteVoice: () => Promise<void>;
   statsLoading: boolean;
   getAuthHeaders: (walletAddr: string, forceRefresh?: boolean) => Promise<Record<string, string>>;
@@ -45,7 +46,7 @@ export default function SettingsModal({
   blockProfanity,
   blockPolitical,
   onFilterUpdate,
-  voiceId,
+  hasVoice,
   onDeleteVoice,
   statsLoading,
   getAuthHeaders,
@@ -74,8 +75,9 @@ export default function SettingsModal({
   }, [isOpen, onClose]);
 
   const handlePriceUpdate = async () => {
-    if (newPrice < 0.01 || newPrice > 0.1) {
-      setPriceError(t('settings.priceRangeError'));
+    // Number.isFinite also rejects the NaN an emptied input produces.
+    if (!Number.isFinite(newPrice) || newPrice < PRICING.MIN_PRICE_SOL || newPrice > PRICING.MAX_PRICE_SOL) {
+      setPriceError(t('settings.priceRangeError', { min: PRICING.MIN_PRICE_SOL, max: PRICING.MAX_PRICE_SOL }));
       return;
     }
     setIsUpdating(true);
@@ -164,13 +166,10 @@ export default function SettingsModal({
                 {t('settings.voiceManagement')}
                 <span className="h-px flex-1 bg-voclira-night/10" aria-hidden="true" />
               </h3>
-              {voiceId ? (
+              {hasVoice ? (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-voclira-olive/15 border border-voclira-olive/40 mb-3">
                   <div className="w-2 h-2 rounded-full bg-voclira-olive animate-pulse" />
                   <span className="text-sm text-foreground font-medium">{t('settings.voiceCloneActive')}</span>
-                  <span className="text-xs text-muted-foreground ml-auto font-mono">
-                    {voiceId.slice(0, 12)}...
-                  </span>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-voclira-terracotta/15 border border-voclira-terracotta/45 mb-3">
@@ -199,15 +198,17 @@ export default function SettingsModal({
                 {t('settings.pricing')}
                 <span className="h-px flex-1 bg-voclira-night/10" aria-hidden="true" />
               </h3>
-              <label className="text-sm text-muted-foreground">{t('settings.pricePer150')}</label>
+              <label className="text-sm text-muted-foreground">
+                {t('settings.pricePer150', { unitChars: PRICING.UNIT_CHARS })}
+              </label>
               <div className="flex gap-2 items-center">
                 {statsLoading ? (
                   <div className="animate-pulse w-20 h-9 rounded-lg bg-muted" />
                 ) : (
                   <input
                     type="number"
-                    min={0.01}
-                    max={0.1}
+                    min={PRICING.MIN_PRICE_SOL}
+                    max={PRICING.MAX_PRICE_SOL}
                     step={0.01}
                     value={newPrice}
                     onChange={(e) => setNewPrice(parseFloat(e.target.value))}

@@ -1,5 +1,6 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { TransactionVerificationError, VocliraError } from '@/lib/errors'
+import { platformFeeLamports } from '@/lib/limits'
 
 const connection = new Connection(
   process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com',
@@ -18,7 +19,8 @@ export async function verifyTransaction(
     throw new VocliraError('Platform wallet not configured', 'CONFIG_ERROR', 500)
   }
 
-  const platformFee = Math.floor(expectedTotalLamports * 0.1)
+  // Same fee formula the client uses when building the transaction (lib/limits.ts).
+  const platformFee = platformFeeLamports(expectedTotalLamports)
   const creatorAmount = expectedTotalLamports - platformFee
 
   const tx = await connection.getTransaction(txSignature, {
