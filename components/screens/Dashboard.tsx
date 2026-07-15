@@ -66,7 +66,7 @@ interface DashboardProps {
     totalEarned: number
     totalMessages: number
     priceInLamports: number
-    voiceId: string
+    hasVoice: boolean
     nftMint: string | null
   } | null;
   priceInSol: string;
