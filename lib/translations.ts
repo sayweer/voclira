@@ -17,7 +17,7 @@ export const translations = {
         cloning: {
           tag: 'Step 1',
           title: 'Voice Cloning',
-          desc: 'A {minSeconds}–{maxSeconds} second recording, an instant AI voice profile',
+          desc: 'A {minSeconds}-to-{maxSeconds}-second recording, an instant AI voice profile',
         },
         income: {
           tag: 'Step 2',
