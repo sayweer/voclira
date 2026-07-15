@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
+import { PRICING } from '@/lib/limits'
 
 export const revalidate = 180
 
-const FALLBACK_USD = 150
+const FALLBACK_USD = PRICING.SOL_USD_FALLBACK
 
 export async function GET(): Promise<NextResponse> {
   try {

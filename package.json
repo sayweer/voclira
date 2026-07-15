@@ -18,6 +18,7 @@
     "@metaplex-foundation/umi-bundle-defaults": "^1.5.1",
     "@metaplex-foundation/umi-signer-wallet-adapters": "^1.5.1",
     "@radix-ui/react-slot": "^1.2.4",
+    "@solana-mobile/wallet-adapter-mobile": "^2.1.5",
     "@solana/wallet-adapter-base": "^0.9.27",
     "@solana/wallet-adapter-react": "^0.15.39",
     "@solana/wallet-adapter-react-ui": "^0.9.39",

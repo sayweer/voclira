@@ -23,6 +23,7 @@ import NewsMarquee from '@/components/ui/news-marquee'
 import { GooeyText } from '@/components/ui/gooey-text-morphing'
 import DisplayCards from '@/components/ui/display-cards'
 import RadialOrbitalTimeline, { OrbitalItem } from '@/components/ui/radial-orbital-timeline'
+import { RECORDING } from '@/lib/limits'
 
 
 const NEWS_IMAGES = Array.from({ length: 17 }, (_, i) => `/news/news-${i + 1}.png`)
@@ -37,10 +38,12 @@ const item = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: 'easeOut' } },
 }
 
+// Stack offsets shrink below `sm` so the fanned deck fits phone viewports —
+// one component serves every breakpoint (no separate mobile markup).
 const FEATURE_STACK_CLASSES = [
   "[grid-area:stack] hover:-translate-y-10 before:absolute before:w-[100%] before:rounded-xl before:h-[100%] before:content-[''] before:bg-blend-overlay before:bg-voclira-cream/25 grayscale-[60%] hover:before:opacity-0 before:transition-opacity before:duration-700 hover:grayscale-0 before:left-0 before:top-0",
-  "[grid-area:stack] translate-x-16 translate-y-10 hover:-translate-y-1 before:absolute before:w-[100%] before:rounded-xl before:h-[100%] before:content-[''] before:bg-blend-overlay before:bg-voclira-cream/25 grayscale-[60%] hover:before:opacity-0 before:transition-opacity before:duration-700 hover:grayscale-0 before:left-0 before:top-0",
-  '[grid-area:stack] translate-x-32 translate-y-20 hover:translate-y-10',
+  "[grid-area:stack] translate-x-4 translate-y-10 sm:translate-x-16 hover:-translate-y-1 before:absolute before:w-[100%] before:rounded-xl before:h-[100%] before:content-[''] before:bg-blend-overlay before:bg-voclira-cream/25 grayscale-[60%] hover:before:opacity-0 before:transition-opacity before:duration-700 hover:grayscale-0 before:left-0 before:top-0",
+  '[grid-area:stack] translate-x-8 translate-y-20 sm:translate-x-32 hover:translate-y-10',
 ]
 
 export default function Landing() {
@@ -72,7 +75,10 @@ export default function Landing() {
     icon: f.icon,
     iconClassName: f.iconClassName,
     title: t(`landing.features.${f.key}.title`),
-    description: t(`landing.features.${f.key}.desc`),
+    description: t(`landing.features.${f.key}.desc`, {
+      minSeconds: RECORDING.MIN_SECONDS,
+      maxSeconds: RECORDING.MAX_SECONDS,
+    }),
     date: t(`landing.features.${f.key}.tag`),
     className: FEATURE_STACK_CLASSES[i],
   }))
@@ -185,28 +191,9 @@ export default function Landing() {
           <span className="h-px flex-1 bg-voclira-burgundy/30" />
         </header>
 
-        {/* Desktop: skewed stack */}
-        <div className="hidden md:flex justify-center pb-24">
+        {/* Skewed stack — single responsive component for every breakpoint */}
+        <div className="flex justify-center pb-24">
           <DisplayCards cards={featureCards} />
-        </div>
-
-        {/* Mobile: plain vertical cards */}
-        <div className="flex flex-col gap-4 md:hidden">
-          {featureCards.map((card) => (
-            <div
-              key={card.date}
-              className="flex flex-col gap-2 rounded-xl border border-voclira-burgundy/15 bg-voclira-paper/90 px-4 py-3"
-            >
-              <div className="flex items-center gap-2">
-                <span className={`relative inline-block rounded-full p-1.5 ${card.iconClassName}`}>
-                  {card.icon}
-                </span>
-                <p className="text-lg font-medium">{card.title}</p>
-              </div>
-              <p className="text-sm text-voclira-burgundy/70">{card.description}</p>
-              <p className="text-xs uppercase tracking-wide text-voclira-terracotta">{card.date}</p>
-            </div>
-          ))}
         </div>
 
         {/* Content-control footnote */}
@@ -227,25 +214,8 @@ export default function Landing() {
             <span className="h-px flex-1 bg-voclira-cream/30" />
           </header>
 
-          {/* Desktop: orbiting use cases */}
-          <div className="hidden md:block">
-            <RadialOrbitalTimeline items={orbitalItems} />
-          </div>
-
-          {/* Mobile: classified-ads grid */}
-          <div className="grid grid-cols-2 gap-px border border-voclira-cream/20 bg-voclira-cream/20 md:hidden">
-            {useCases.map(({ key, icon: Icon }) => (
-              <div key={key} className="bg-voclira-night p-5">
-                <Icon className="mb-3 size-5 text-voclira-terracotta" />
-                <p className="font-display font-semibold">
-                  {t(`landing.useCases.items.${key}.title`)}
-                </p>
-                <p className="mt-1 text-xs text-voclira-cream/60">
-                  {t(`landing.useCases.items.${key}.desc`)}
-                </p>
-              </div>
-            ))}
-          </div>
+          {/* Orbiting use cases — the orbital scales itself down on phones */}
+          <RadialOrbitalTimeline items={orbitalItems} />
         </div>
       </section>
 

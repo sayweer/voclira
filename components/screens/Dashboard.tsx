@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import type { RecentPurchaseRow } from '@/types';
 import { audioSrcFromStored } from '@/lib/audio-download';
+import { PRICING } from '@/lib/limits';
 import { useLanguage } from '@/components/LanguageProvider';
 import LanguageToggle from '@/components/LanguageToggle';
 
@@ -137,7 +138,7 @@ export default function Dashboard({
       }
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? (language === 'tr' ? `Mesajlar yüklenemedi (HTTP ${res.status})` : `Failed to load messages (HTTP ${res.status})`));
+        throw new Error(body?.error ?? t('dashboard.loadMessagesFailed', { status: res.status }));
       }
       const json = await res.json();
       setPurchases(json.recent ?? []);
@@ -344,7 +345,7 @@ export default function Dashboard({
                         {((creatorStats?.totalEarned ?? 0) / 1e9).toFixed(2)} SOL
                       </h3>
                       <p className="text-muted-foreground text-sm mt-1">
-                        ≈ ${(((creatorStats?.totalEarned ?? 0) / 1e9) * (solUsd ?? 150)).toFixed(0)} USD
+                        ≈ ${(((creatorStats?.totalEarned ?? 0) / 1e9) * (solUsd ?? PRICING.SOL_USD_FALLBACK)).toFixed(0)} USD
                       </p>
                     </div>
                     <TrendingUp className="w-6 h-6 text-voclira-terracotta" />
@@ -371,7 +372,7 @@ export default function Dashboard({
                 <Card className="bg-card border-border p-6 space-y-2 h-full">
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className="font-display text-xs uppercase tracking-[0.25em] text-muted-foreground mb-2">{t('dashboard.pricePer150')}</p>
+                      <p className="font-display text-xs uppercase tracking-[0.25em] text-muted-foreground mb-2">{t('dashboard.pricePer150', { unitChars: PRICING.UNIT_CHARS })}</p>
                       <h3 className="font-display text-4xl font-bold">{priceInSol} SOL</h3>
                       <p className="text-muted-foreground text-sm mt-1">{t('dashboard.currentRate')}</p>
                     </div>
@@ -394,7 +395,7 @@ export default function Dashboard({
                   type="text"
                   value={fanPageUrl}
                   readOnly
-                  placeholder={language === 'tr' ? 'Cüzdanınızı bağlayarak fan sayfası linkinizi alın' : 'Connect wallet to get your fan page link'}
+                  placeholder={t('dashboard.connectForLink')}
                   className="w-full bg-black/5 border border-border rounded-lg px-4 py-2.5 text-sm font-mono text-muted-foreground focus:outline-none"
                 />
                 <div className="flex flex-wrap gap-2">
@@ -629,6 +630,8 @@ function statusIcon(status: string) {
       return <XCircle className="w-4 h-4 text-rose-600" />
     case 'refunded':
       return <HelpCircle className="w-4 h-4 text-amber-600" />
+    case 'failed':
+      return <AlertCircle className="w-4 h-4 text-orange-600" />
     default:
       return <Clock className="w-4 h-4 text-sky-600 animate-pulse" />
   }
@@ -639,6 +642,7 @@ function statusLabel(status: string, t: any) {
     case 'completed': return t('messageCard.statusCompleted')
     case 'rejected': return t('messageCard.statusRejected')
     case 'refunded': return t('messageCard.statusRefunded')
+    case 'failed': return t('messageCard.statusFailed')
     default: return t('messageCard.statusPending')
   }
 }
@@ -651,6 +655,8 @@ function statusClass(status: string) {
       return 'bg-rose-600/10 text-rose-700 border-rose-600/25'
     case 'refunded':
       return 'bg-amber-500/15 text-amber-700 border-amber-600/25'
+    case 'failed':
+      return 'bg-orange-600/10 text-orange-700 border-orange-600/25'
     default:
       return 'bg-sky-600/10 text-sky-700 border-sky-600/25'
   }
@@ -729,7 +735,7 @@ function MessageCard({
       {/* Message content */}
       <div className="flex-1">
         <p className="italic font-serif text-sm text-foreground/90 pl-3 border-l-2 border-primary/30 py-1.5 bg-black/5 rounded-r-lg pr-3 leading-relaxed">
-          "{purchase.fan_text || (language === 'tr' ? 'Metin yok' : 'No text')}"
+          "{purchase.fan_text || t('messageCard.noText')}"
         </p>
       </div>
 
@@ -783,7 +789,7 @@ function MessageCard({
             <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
             <div className="flex-1">
               <span className="font-semibold block text-rose-600">{t('messageCard.moderationBlocked')}</span>
-              <span className="italic">{purchase.rejection_reason || (language === 'tr' ? 'Güvenlik filtrelerine takıldı.' : 'Blocked by safety filters.')}</span>
+              <span className="italic">{purchase.rejection_reason || t('messageCard.blockedBySafety')}</span>
             </div>
           </div>
         ) : purchase.status === 'pending' ? (
@@ -795,6 +801,11 @@ function MessageCard({
           <div className="flex items-center gap-2 bg-amber-600/5 border border-amber-600/15 px-3 py-2 rounded-lg text-amber-700 text-xs">
             <HelpCircle className="w-4 h-4 shrink-0 text-amber-600" />
             <span>{t('messageCard.refundedDesc')}</span>
+          </div>
+        ) : purchase.status === 'failed' ? (
+          <div className="flex items-center gap-2 bg-orange-600/5 border border-orange-600/15 px-3 py-2 rounded-lg text-orange-700 text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0 text-orange-600" />
+            <span>{t('messageCard.failedDesc')}</span>
           </div>
         ) : null}
       </div>

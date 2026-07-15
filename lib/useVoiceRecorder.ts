@@ -1,20 +1,7 @@
 'use client'
 
 import { useRef, useState, useCallback, useEffect } from 'react'
-
-const getSupportedMimeType = (): string => {
-  const types = [
-    'audio/mp4',
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-  ]
-  for (const type of types) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) return type
-  }
-  return ''
-}
+import { pickSupportedAudioMime, DEFAULT_AUDIO_MIME } from '@/lib/audio-mime'
 
 export type RecorderError = 'permission' | 'access' | null
 
@@ -30,9 +17,9 @@ export interface VoiceRecorder {
 }
 
 /**
- * Minimal MediaRecorder wrapper used by both the IVC sample recorder and the PVC
- * captcha verification step. Handles getUserMedia, recording, an elapsed-seconds timer,
- * and stream cleanup. Returns the recorded Blob once stopped.
+ * Minimal MediaRecorder wrapper used by the consent-verification recorder.
+ * Handles getUserMedia, recording, an elapsed-seconds timer, and stream cleanup.
+ * Returns the recorded Blob once stopped.
  */
 export function useVoiceRecorder(): VoiceRecorder {
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -43,7 +30,7 @@ export function useVoiceRecorder(): VoiceRecorder {
   const [isRecording, setIsRecording] = useState(false)
   const [seconds, setSeconds] = useState(0)
   const [blob, setBlob] = useState<Blob | null>(null)
-  const [mimeType, setMimeType] = useState('audio/webm')
+  const [mimeType, setMimeType] = useState(DEFAULT_AUDIO_MIME)
   const [error, setError] = useState<RecorderError>(null)
 
   const cleanupStream = () => {
@@ -61,14 +48,14 @@ export function useVoiceRecorder(): VoiceRecorder {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
-      const mt = getSupportedMimeType()
+      const mt = pickSupportedAudioMime()
       const rec = new MediaRecorder(stream, mt ? { mimeType: mt } : undefined)
       recorderRef.current = rec
       chunksRef.current = []
 
       rec.ondataavailable = (e) => chunksRef.current.push(e.data)
       rec.onstop = () => {
-        const effective = mt || 'audio/webm'
+        const effective = mt || DEFAULT_AUDIO_MIME
         setBlob(new Blob(chunksRef.current, { type: effective }))
         setMimeType(effective)
         cleanupStream()

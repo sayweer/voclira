@@ -109,6 +109,40 @@ export async function updateCreatorPrice(walletAddress: string, priceInLamports:
   if (error) throw new VocliraError('Failed to update price', 'DB_ERROR', 500)
 }
 
+/**
+ * Re-record flow: replaces only the voice profile + consent fields of an existing
+ * creator. Unlike saveCreator's upsert, this preserves price, brand-safety filters,
+ * earnings stats, and the NFT mint.
+ */
+export async function updateCreatorVoice(
+  walletAddress: string,
+  data: {
+    voiceProfileObjectKey: string
+    verificationAudioObjectKey: string
+    consentAt: string
+    consentIp: string
+    consentTextVersion: string
+    language?: string
+  }
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    voice_profile_object_key: data.voiceProfileObjectKey,
+    verification_audio_object_key: data.verificationAudioObjectKey,
+    consent_at: data.consentAt,
+    consent_ip: data.consentIp,
+    consent_text_version: data.consentTextVersion,
+    is_active: true,
+  }
+  if (data.language !== undefined) payload.language = data.language
+
+  const { error } = await supabase
+    .from('creators')
+    .update(payload)
+    .eq('wallet_address', walletAddress)
+
+  if (error) throw new VocliraError('Failed to update voice profile', 'DB_ERROR', 500)
+}
+
 export async function updateCreatorNftMint(walletAddress: string, nftMint: string): Promise<void> {
   const { error } = await supabase
     .from('creators')

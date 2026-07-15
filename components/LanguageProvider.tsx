@@ -11,21 +11,30 @@ interface LanguageContextType {
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>('en');
-  const [mounted, setMounted] = useState(false);
+export function LanguageProvider({
+  children,
+  initialLanguage = 'en',
+}: {
+  children: React.ReactNode;
+  // Read from the voclira_lang cookie by the root layout, so the server and the
+  // first client paint already use the visitor's language (no EN→TR flash).
+  initialLanguage?: Language;
+}) {
+  const [language, setLanguageState] = useState<Language>(initialLanguage);
 
   useEffect(() => {
+    // localStorage stays authoritative — it covers visitors from before the cookie existed.
     const saved = localStorage.getItem('voclira_lang') as Language;
     if (saved === 'en' || saved === 'tr') {
       setLanguageState(saved);
     }
-    setMounted(true);
   }, []);
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem('voclira_lang', lang);
+    // The cookie lets the server render <html lang> and the right copy on the next visit.
+    document.cookie = `voclira_lang=${lang}; path=/; max-age=31536000; samesite=lax`;
   };
 
   const t = (path: string, variables?: Record<string, string | number>): string => {
@@ -64,7 +73,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     return text;
   };
 
-  // We still render on server/first-render with default language to avoid mismatch
   return (
     <LanguageContext.Provider value={{ language, setLanguage, t }}>
       {children}

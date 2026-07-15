@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCreatorByWallet, saveCreator } from '@/lib/supabase'
+import { getCreatorByWallet, updateCreatorVoice } from '@/lib/supabase'
 import { getPrivateObjectSize } from '@/lib/r2'
 import { RECORDING, REFERENCE_AUDIO } from '@/lib/limits'
 import { consumeSession } from '@/lib/session'
 import { getErrorResponse } from '@/lib/errors'
-import { safeParseJson, isValidWalletAddress, isValidPrice, getClientIp } from '@/lib/validation'
+import { safeParseJson, isValidWalletAddress, getClientIp } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
-import type { RegisterCreatorRequest } from '@/types'
+import { verifyWalletAuthOrSession } from '@/lib/auth'
 
-// Chatterbox/Fal onboarding: no ElevenLabs cloning. The creator's reference WAV and
-// consent verification WAV are uploaded directly to R2 (private) via presigned PUT;
-// here we consume the one-time upload sessions, confirm the objects exist (HEAD),
-// and persist voice_profile_object_key + consent.
+// Re-record flow for ACTIVE creators. Unlike /api/creator/register (unauthenticated,
+// guarded by the already-registered check), replacing an existing voice profile is a
+// destructive action on a live creator — so this route REQUIRES wallet auth.
+// Consumes the same one-time upload sessions the register flow produces.
 const UPLOAD_SESSION_PREFIX = 'upload-session'
 
 interface UploadSession {
@@ -20,61 +20,46 @@ interface UploadSession {
   type: 'voice-profile' | 'verification-audio'
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+interface UpdateVoiceBody {
+  walletAddress?: string
+  uploadSessionId?: string
+  verificationUploadSessionId?: string
+  consentTextVersion?: string
+  language?: string
+}
+
+export async function PATCH(req: NextRequest): Promise<NextResponse> {
   const ip = getClientIp(req)
   if (!(await checkRateLimit(ip, 10, 60 * 60 * 1000))) {
     return NextResponse.json(
-      { success: false, error: 'Too many registration attempts. Please try again later.' },
+      { success: false, error: 'Too many attempts. Please try again later.' },
       { status: 429 }
     )
   }
 
-  const body = await safeParseJson<Partial<RegisterCreatorRequest>>(req)
+  const body = await safeParseJson<UpdateVoiceBody>(req)
   if (body === null) {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const {
-    walletAddress,
-    creatorName,
-    priceInLamports,
-    language,
-    uploadSessionId,
-    verificationUploadSessionId,
-    consentTextVersion,
-  } = body
+  const { walletAddress, uploadSessionId, verificationUploadSessionId, consentTextVersion, language } = body
 
-  if (
-    !walletAddress ||
-    !creatorName ||
-    priceInLamports === undefined ||
-    !uploadSessionId ||
-    !verificationUploadSessionId ||
-    !consentTextVersion
-  ) {
+  if (!walletAddress || !uploadSessionId || !verificationUploadSessionId || !consentTextVersion) {
     return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 })
   }
   if (!isValidWalletAddress(walletAddress)) {
     return NextResponse.json({ success: false, error: 'Invalid wallet address' }, { status: 400 })
   }
-  if (typeof creatorName !== 'string' || creatorName.trim().length < 1 || creatorName.trim().length > 100) {
-    return NextResponse.json({ success: false, error: 'Creator name must be 1-100 characters' }, { status: 400 })
+
+  const authorized = await verifyWalletAuthOrSession(walletAddress, req.headers)
+  if (!authorized) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   }
-  if (!isValidPrice(priceInLamports)) {
-    return NextResponse.json({ success: false, error: 'Price must be between 0.01 and 0.1 SOL' }, { status: 400 })
-  }
-  const lang = language === 'tr' ? 'tr' : 'en'
 
   try {
-    const existing = await getCreatorByWallet(walletAddress)
-    if (existing !== null && existing.is_active && existing.voice_profile_object_key) {
-      // Active creators re-record via the authenticated /api/creator/update-voice
-      // endpoint — the client falls back to it on this code (upload sessions are
-      // still unconsumed at this point, so they remain valid for that call).
-      return NextResponse.json(
-        { success: false, error: 'Creator already registered', code: 'ALREADY_REGISTERED' },
-        { status: 409 }
-      )
+    const creator = await getCreatorByWallet(walletAddress)
+    if (creator === null) {
+      return NextResponse.json({ success: false, error: 'Creator not found' }, { status: 404 })
     }
 
     // Consume both one-time upload sessions; validate they belong to this wallet,
@@ -119,19 +104,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       )
     }
 
-    const creator = await saveCreator({
-      walletAddress,
-      creatorName,
-      priceInLamports,
-      language: lang,
+    await updateCreatorVoice(walletAddress, {
       voiceProfileObjectKey: voiceSession.objectKey,
+      verificationAudioObjectKey: verifySession.objectKey,
       consentAt: new Date().toISOString(),
       consentIp: ip,
       consentTextVersion,
-      verificationAudioObjectKey: verifySession.objectKey,
+      language: language === 'tr' || language === 'en' ? language : undefined,
     })
 
-    return NextResponse.json({ success: true, creatorId: creator.id }, { status: 201 })
+    return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {
     const { error: message, code, statusCode } = getErrorResponse(error)
     return NextResponse.json({ success: false, error: message, code }, { status: statusCode })

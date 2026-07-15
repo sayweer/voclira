@@ -11,6 +11,12 @@ import {
   PhantomWalletAdapter,
   SolflareWalletAdapter,
 } from '@solana/wallet-adapter-wallets'
+import {
+  SolanaMobileWalletAdapter,
+  createDefaultAddressSelector,
+  createDefaultAuthorizationResultCache,
+  createDefaultWalletNotFoundHandler,
+} from '@solana-mobile/wallet-adapter-mobile'
 import '@solana/wallet-adapter-react-ui/styles.css'
 
 interface Props { children: ReactNode }
@@ -29,6 +35,15 @@ export const SolanaWalletProvider: FC<Props> = ({ children }) => {
 
   const wallets = useMemo(
     () => [
+      // Android Solana Mobile deep-link flow; the adapter hides itself on
+      // unsupported platforms (desktop, iOS), where Phantom/Solflare take over.
+      new SolanaMobileWalletAdapter({
+        addressSelector: createDefaultAddressSelector(),
+        appIdentity: { name: 'Voclira' },
+        authorizationResultCache: createDefaultAuthorizationResultCache(),
+        chain: network,
+        onWalletNotFound: createDefaultWalletNotFoundHandler(),
+      }),
       new PhantomWalletAdapter(),
       new SolflareWalletAdapter(),
     ],

@@ -345,7 +345,7 @@ function ChartCard({ data, days }: { data: AnalyticsResponse; days: AnalyticsRan
               }}
               labelStyle={{ color: '#2A0E0E' }}
               formatter={(value, name) => {
-                const localizedName = name === 'Net SOL' ? t('analytics.netSol') : (language === 'tr' ? 'Mesaj' : 'Messages')
+                const localizedName = name === 'Net SOL' ? t('analytics.netSol') : t('analytics.messagesName')
                 if (name === 'Net SOL' && typeof value === 'number') {
                   return [`${(value / 1e9).toFixed(4)} SOL`, localizedName]
                 }
@@ -369,7 +369,7 @@ function ChartCard({ data, days }: { data: AnalyticsResponse; days: AnalyticsRan
               yAxisId="right"
               type="monotone"
               dataKey="messages"
-              name={language === 'tr' ? 'Mesaj' : 'Messages'}
+              name={t('analytics.messagesName')}
               stroke="#607456"
               strokeWidth={2}
               dot={false}

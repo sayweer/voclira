@@ -2,6 +2,9 @@ import Groq from 'groq-sdk'
 import { createHash } from 'crypto'
 import type { ModerationResult, ModerationCategory, SupportedLanguage } from '@/types'
 import { VocliraError, ModerationError, UnsafeContentError } from '@/lib/errors'
+import { TEXT, maxTextLengthFor } from '@/lib/limits'
+
+export { maxTextLengthFor }
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY ?? '',
@@ -46,44 +49,21 @@ If safe: {"safe": true}
 If unsafe: {"safe": false, "category": "<category>", "reason": "<one sentence in English>"}`
 }
 
-export function validateTextLength(text: string): void {
-  if (text.trim().length < 5) {
-    throw new VocliraError(
-      'Text too short (minimum 5 characters)',
-      'INVALID_TEXT_LENGTH',
-      400
-    )
-  }
-  if (text.trim().length > 300) {
-    throw new VocliraError(
-      'Text too long (maximum 300 characters)',
-      'INVALID_TEXT_LENGTH',
-      400
-    )
-  }
-}
-
-// Per-language character ceilings (Chatterbox engine limits, MVP):
-//   Multilingual (tr) max 300 → 280 buffer for tags/punctuation
-//   Turbo (en) max 5000 → 500 MVP cap (cost + "mini message" format)
-const MIN_TEXT_LENGTH = 5
-export const MAX_TEXT_LENGTH_BY_LANGUAGE: Record<SupportedLanguage, number> = { tr: 280, en: 500 }
-
 /** Coerces arbitrary input to a supported generation language, falling back when invalid. */
 export function normalizeLanguage(input: unknown, fallback: SupportedLanguage = 'en'): SupportedLanguage {
   return input === 'tr' || input === 'en' ? input : fallback
 }
 
-export function maxTextLengthFor(language: string): number {
-  return MAX_TEXT_LENGTH_BY_LANGUAGE[language === 'tr' ? 'tr' : 'en']
-}
-
-/** Length guard keyed to the creator's language. Used pre-payment AND post-optimizer. */
+/**
+ * Length guard keyed to the generation language.
+ * Used pre-payment (/api/moderate) AND again at generate time (defense in depth).
+ * Limits live in lib/limits.ts — the client reads the same values.
+ */
 export function validateTextLengthForLanguage(text: string, language: string): void {
   const trimmed = text.trim().length
   const max = maxTextLengthFor(language)
-  if (trimmed < MIN_TEXT_LENGTH) {
-    throw new VocliraError(`Text too short (minimum ${MIN_TEXT_LENGTH} characters)`, 'INVALID_TEXT_LENGTH', 400)
+  if (trimmed < TEXT.MIN_LENGTH) {
+    throw new VocliraError(`Text too short (minimum ${TEXT.MIN_LENGTH} characters)`, 'INVALID_TEXT_LENGTH', 400)
   }
   if (trimmed > max) {
     throw new VocliraError(`Text too long (maximum ${max} characters for ${language})`, 'INVALID_TEXT_LENGTH', 400)

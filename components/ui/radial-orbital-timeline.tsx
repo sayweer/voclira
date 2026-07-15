@@ -15,14 +15,31 @@ interface RadialOrbitalTimelineProps {
   items: OrbitalItem[]
 }
 
-const ORBIT_RADIUS = 200
+const MAX_ORBIT_RADIUS = 200
+const MIN_ORBIT_RADIUS = 96
 
 export default function RadialOrbitalTimeline({ items }: RadialOrbitalTimelineProps) {
   const [rotationAngle, setRotationAngle] = useState<number>(0)
   const [autoRotate, setAutoRotate] = useState<boolean>(true)
   const [activeNodeId, setActiveNodeId] = useState<number | null>(null)
+  const [orbitRadius, setOrbitRadius] = useState<number>(MAX_ORBIT_RADIUS)
   const containerRef = useRef<HTMLDivElement>(null)
   const orbitRef = useRef<HTMLDivElement>(null)
+
+  // Responsive orbit: shrink the wheel to the container so the same interactive
+  // component works on phones — node size (and thus touch targets) stays intact.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => {
+      const width = el.clientWidth
+      setOrbitRadius(Math.max(MIN_ORBIT_RADIUS, Math.min(MAX_ORBIT_RADIUS, width / 2 - 56)))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === containerRef.current || e.target === orbitRef.current) {
@@ -59,8 +76,8 @@ export default function RadialOrbitalTimeline({ items }: RadialOrbitalTimelinePr
     const angle = ((index / total) * 360 + rotationAngle) % 360
     const radian = (angle * Math.PI) / 180
 
-    const x = ORBIT_RADIUS * Math.cos(radian)
-    const y = ORBIT_RADIUS * Math.sin(radian)
+    const x = orbitRadius * Math.cos(radian)
+    const y = orbitRadius * Math.sin(radian)
 
     const zIndex = Math.round(100 + 50 * Math.cos(radian))
     const opacity = Math.max(0.4, Math.min(1, 0.4 + 0.6 * ((1 + Math.sin(radian)) / 2)))
@@ -75,7 +92,7 @@ export default function RadialOrbitalTimeline({ items }: RadialOrbitalTimelinePr
 
   return (
     <div
-      className="relative flex h-[40rem] w-full flex-col items-center justify-center overflow-hidden"
+      className="relative flex h-[28rem] w-full flex-col items-center justify-center overflow-hidden sm:h-[40rem]"
       ref={containerRef}
       onClick={handleContainerClick}
     >
@@ -96,7 +113,10 @@ export default function RadialOrbitalTimeline({ items }: RadialOrbitalTimelinePr
           </div>
 
           {/* Orbit ring */}
-          <div className="absolute h-96 w-96 rounded-full border border-voclira-cream/15" />
+          <div
+            className="absolute rounded-full border border-voclira-cream/15"
+            style={{ width: orbitRadius * 2 - 16, height: orbitRadius * 2 - 16 }}
+          />
 
           {items.map((item, index) => {
             const position = calculateNodePosition(index, items.length)
@@ -142,7 +162,7 @@ export default function RadialOrbitalTimeline({ items }: RadialOrbitalTimelinePr
                 </div>
 
                 {isExpanded && (
-                  <div className="absolute top-24 left-1/2 w-64 -translate-x-1/2 overflow-visible rounded-xl border border-voclira-cream/30 bg-voclira-night/95 p-4 shadow-xl shadow-voclira-cream/10 backdrop-blur-lg">
+                  <div className="absolute top-24 left-1/2 w-64 max-w-[calc(100vw-3rem)] -translate-x-1/2 overflow-visible rounded-xl border border-voclira-cream/30 bg-voclira-night/95 p-4 shadow-xl shadow-voclira-cream/10 backdrop-blur-lg">
                     <div className="absolute -top-3 left-1/2 h-3 w-px -translate-x-1/2 bg-voclira-cream/50" />
                     <p className="font-display text-sm font-semibold text-voclira-cream">
                       {item.title}

@@ -85,7 +85,7 @@ export default function App() {
     totalEarned: number
     totalMessages: number
     priceInLamports: number
-    voiceId: string
+    hasVoice: boolean
     nftMint: string | null
   } | null>(null)
   const [mintingLicense, setMintingLicense] = useState(false)
@@ -170,7 +170,9 @@ export default function App() {
             totalEarned: creator.total_earned,
             totalMessages: creator.total_messages,
             priceInLamports: creator.price_lamports,
-            voiceId: creator.voice_id,
+            // A creator is "ready" the moment a zero-shot reference exists —
+            // the legacy ElevenLabs voice_id is meaningless for new profiles.
+            hasVoice: Boolean(creator.voice_profile_object_key),
             nftMint: creator.nft_mint ?? null,
           })
           setBlockAdult(creator.block_adult ?? true)
@@ -377,7 +379,35 @@ export default function App() {
       const data = await res.json()
 
       if (!res.ok) {
-        if (res.status === 409) {
+        if (res.status === 409 && data.code === 'ALREADY_REGISTERED') {
+          // Active creator re-recording: the upload sessions are still unconsumed,
+          // so replace the voice profile via the authenticated update endpoint.
+          const updateVoice = async (retry = true): Promise<Response> => {
+            const headers = await getAuthHeaders(walletAddr)
+            const r = await fetch('/api/creator/update-voice', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...headers },
+              body: JSON.stringify({
+                walletAddress: walletAddr,
+                uploadSessionId,
+                verificationUploadSessionId,
+                consentTextVersion: 'v1',
+                language,
+              }),
+            })
+            if (r.status === 401 && retry) {
+              sessionStorage.removeItem(`voclira_session_${walletAddr}`)
+              return updateVoice(false)
+            }
+            return r
+          }
+
+          const upRes = await updateVoice()
+          if (!upRes.ok) {
+            const upData = (await upRes.json().catch(() => null)) as { error?: string } | null
+            setRegisterError(upData?.error ?? 'Voice update failed')
+            return
+          }
           setAppState('dashboard')
           return
         }
@@ -536,7 +566,7 @@ export default function App() {
         blockProfanity={blockProfanity}
         blockPolitical={blockPolitical}
         onFilterUpdate={handleFilterUpdate}
-        voiceId={creatorStats?.voiceId ?? null}
+        hasVoice={Boolean(creatorStats?.hasVoice)}
         onDeleteVoice={handleDeleteVoice}
         statsLoading={statsLoading}
         getAuthHeaders={getAuthHeaders}

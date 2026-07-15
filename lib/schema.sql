@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   fan_text TEXT NOT NULL,
   audio_url TEXT,
   status TEXT DEFAULT 'pending'
-    CHECK (status IN ('pending','completed','refunded','rejected')),
+    CHECK (status IN ('pending','completed','failed','refunded','rejected')),
   amount_lamports BIGINT NOT NULL,
   platform_fee_lamports BIGINT NOT NULL DEFAULT 0,
   play_count INTEGER NOT NULL DEFAULT 0,

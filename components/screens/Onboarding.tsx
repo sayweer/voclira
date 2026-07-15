@@ -10,6 +10,9 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { WavePath } from '@/components/ui/wave-path';
 import { AudioUpload } from '@/components/onboarding/AudioUpload';
 import { ConsentStep } from '@/components/onboarding/ConsentStep';
+import { translations } from '@/lib/translations';
+import { RECORDING, PRICING } from '@/lib/limits';
+import { pickSupportedAudioMime, DEFAULT_AUDIO_MIME } from '@/lib/audio-mime';
 
 interface OnboardingProps {
   step: 1 | 2 | 3;
@@ -41,18 +44,8 @@ const formatTime = (seconds: number) => {
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
-const SCRIPT_EN = `Hello. I'm recording this to create an AI clone of my voice. I love walking outdoors, reading a good book, and spending time with the people I care about. I hope this voice turns out as warm and natural as I sound right now.`
-
-const SCRIPT_TR = `Merhaba. Bu kaydı, sesimin yapay zeka klonunu oluşturmak için yapıyorum. Açık havada yürüyüş yapmayı, güzel bir kitap okumayı ve sevdiklerimle vakit geçirmeyi severim. Umarım bu ses de tıpkı şu an konuştuğum kadar sıcak ve doğal çıkar.`
-
-const priceOptions = [0.01, 0.03, 0.05, 0.08, 0.1];
-const usdPrices: Record<number, number> = {
-  0.01: 1.5,
-  0.03: 4.5,
-  0.05: 7.5,
-  0.08: 12,
-  0.1: 15,
-};
+// Example message size used in the earnings preview (a fan sending 2 billing units).
+const EXAMPLE_UNITS = 2;
 
 export default function Onboarding({
   step,
@@ -84,6 +77,21 @@ export default function Onboarding({
   const audioChunksRef = useRef<Blob[]>([])
   const [micError, setMicError] = useState<string | null>(null)
   const [savedDuration, setSavedDuration] = useState(0)
+  const [solUsd, setSolUsd] = useState<number | null>(null)
+
+  // Live SOL/USD rate for the price previews (same pattern as Dashboard).
+  useEffect(() => {
+    let ignore = false
+    fetch('/api/sol-price')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!ignore && typeof json?.usd === 'number') setSolUsd(json.usd)
+      })
+      .catch(() => {})
+    return () => {
+      ignore = true
+    }
+  }, [])
   const recordingSecondsRef = useRef(recordingSeconds)
   useEffect(() => { recordingSecondsRef.current = recordingSeconds }, [recordingSeconds])
 
@@ -283,7 +291,7 @@ export default function Onboarding({
   }
 
   useEffect(() => {
-    if (isRecording && recordingSeconds >= 25) {
+    if (isRecording && recordingSeconds >= RECORDING.MAX_SECONDS) {
       mediaRecorderRef.current?.stop()
     }
   }, [isRecording, recordingSeconds])
@@ -295,26 +303,12 @@ export default function Onboarding({
     }
   }, [])
 
-  const getSupportedMimeType = (): string => {
-    const types = [
-      'audio/mp4',
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/ogg',
-    ]
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) return type
-    }
-    return ''
-  }
-
   const handleRecord = async () => {
     if (!isRecording) {
       try {
         setMicError(null)
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        const mimeType = getSupportedMimeType()
+        const mimeType = pickSupportedAudioMime()
         const mediaRecorder = new MediaRecorder(
           stream,
           mimeType ? { mimeType } : undefined
@@ -328,7 +322,7 @@ export default function Onboarding({
 
         mediaRecorder.onstop = () => {
           setSavedDuration(recordingSecondsRef.current)
-          const effectiveType = mimeType || 'audio/webm'
+          const effectiveType = mimeType || DEFAULT_AUDIO_MIME
           const blob = new Blob(audioChunksRef.current, { type: effectiveType })
           onAudioReady(blob, effectiveType)
           stream.getTracks().forEach(t => t.stop())
@@ -359,8 +353,8 @@ export default function Onboarding({
   const handleReferenceUpload = (files: File[], durationSec: number) => {
     const file = files[0]
     if (!file) return
-    setSavedDuration(durationSec > 0 ? durationSec : 8)
-    onAudioReady(file, file.type || 'audio/webm')
+    setSavedDuration(durationSec > 0 ? durationSec : RECORDING.MIN_SECONDS)
+    onAudioReady(file, file.type || DEFAULT_AUDIO_MIME)
   }
 
   const handleDiscardRecording = () => {
@@ -476,13 +470,19 @@ export default function Onboarding({
           <Card className="w-full max-w-lg bg-card border-border p-8 space-y-6">
             <div className="space-y-2">
               <h2 className="font-display text-2xl font-bold">{t('onboarding.title')}</h2>
-              <p className="text-muted-foreground">{t('onboarding.subtitle')}</p>
+              <p className="text-muted-foreground">
+                {t('onboarding.subtitle', { targetSeconds: RECORDING.TARGET_SECONDS })}
+              </p>
             </div>
 
             {/* Info Box */}
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
               <p className="text-sm text-amber-100">
-                {t('onboarding.infoBox')}
+                {t('onboarding.infoBox', {
+                  targetSeconds: RECORDING.TARGET_SECONDS,
+                  minSeconds: RECORDING.MIN_SECONDS,
+                  maxSeconds: RECORDING.MAX_SECONDS,
+                })}
               </p>
             </div>
 
@@ -492,7 +492,9 @@ export default function Onboarding({
               <div className="bg-black/40 border border-border rounded-lg p-4 max-h-48 overflow-y-auto text-sm font-mono">
                 <textarea
                   readOnly
-                  value={selectedLanguage === 'tr' ? SCRIPT_TR : SCRIPT_EN}
+                  // The script must match the creator's VOICE language (not the UI
+                  // language) — read it directly, same pattern as the consent script.
+                  value={translations[selectedLanguage].onboarding.recordingScript}
                   className="w-full bg-transparent text-foreground text-sm font-mono resize-none outline-none"
                   rows={4}
                 />
@@ -544,14 +546,17 @@ export default function Onboarding({
                   ? `${formatTime(recordingSeconds)} — ${t('onboarding.tapToStop')}`
                   : t('onboarding.tapToStart')}
               </p>
-              {isRecording && recordingSeconds < 8 && (
+              {isRecording && recordingSeconds < RECORDING.MIN_SECONDS && (
                 <p className="text-xs text-amber-400 text-center max-w-xs">
-                  {t('onboarding.cloneQualityWarn')}
+                  {t('onboarding.cloneQualityWarn', {
+                    minSeconds: RECORDING.MIN_SECONDS,
+                    targetSeconds: RECORDING.TARGET_SECONDS,
+                  })}
                 </p>
               )}
-              {audioReady && savedDuration < 8 && (
+              {audioReady && savedDuration < RECORDING.MIN_SECONDS && (
                 <p className="text-sm text-red-400 text-center max-w-xs">
-                  {t('onboarding.minDurationError')}
+                  {t('onboarding.minDurationError', { minSeconds: RECORDING.MIN_SECONDS })}
                 </p>
               )}
               {audioReady && (
@@ -576,7 +581,7 @@ export default function Onboarding({
               </span>
               <div className="h-px flex-1 bg-border" />
             </div>
-            <AudioUpload multiple={false} minDurationSec={8} onFiles={handleReferenceUpload} />
+            <AudioUpload minDurationSec={RECORDING.MIN_SECONDS} onFiles={handleReferenceUpload} />
 
             {/* Action Buttons */}
             <div className="flex gap-4 pt-2">
@@ -589,7 +594,7 @@ export default function Onboarding({
               </Button>
               <Button
                 onClick={onNextStep}
-                disabled={!audioReady || savedDuration < 8}
+                disabled={!audioReady || savedDuration < RECORDING.MIN_SECONDS}
                 className="flex-1 bg-primary text-primary-foreground hover:bg-secondary disabled:bg-primary/30 disabled:text-primary/50 disabled:cursor-not-allowed"
               >
                 {t('onboarding.buttonCreateVoice')} <ChevronRight className="w-4 h-4 ml-2" />
@@ -601,12 +606,14 @@ export default function Onboarding({
           <Card className="w-full max-w-lg bg-card border-border p-8 space-y-6">
             <div className="space-y-2">
               <h2 className="font-display text-2xl font-bold">{t('onboarding.priceTitle')}</h2>
-              <p className="text-muted-foreground">{t('onboarding.priceSubtitle')}</p>
+              <p className="text-muted-foreground">
+                {t('onboarding.priceSubtitle', { unitChars: PRICING.UNIT_CHARS })}
+              </p>
             </div>
 
             {/* Price Options */}
             <div className="grid grid-cols-5 gap-2">
-              {priceOptions.map((price) => (
+              {PRICING.PRICE_OPTIONS_SOL.map((price) => (
                 <button
                   key={price}
                   onClick={() => onSelectPrice(price)}
@@ -617,28 +624,37 @@ export default function Onboarding({
                   }`}
                 >
                   <div className="font-semibold">{price}</div>
-                  <div className="text-xs text-muted-foreground mt-1">{t('onboarding.charsPerUnit')}</div>
-                  <div className="text-xs text-muted-foreground">${usdPrices[price]}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {t('onboarding.charsPerUnit', { unitChars: PRICING.UNIT_CHARS })}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    ${(price * (solUsd ?? PRICING.SOL_USD_FALLBACK)).toFixed(2)}
+                  </div>
                 </button>
               ))}
             </div>
 
             {/* Info Row */}
             <div className="text-center text-sm text-muted-foreground">
-              {t('onboarding.mostCreators')}
+              {t('onboarding.mostCreators', { unitChars: PRICING.UNIT_CHARS })}
             </div>
 
             <WavePath className="my-3 text-ember-3/30" />
 
             {/* Earnings Preview */}
             <div className="bg-[#1B0506] border border-ember-2/40 rounded-lg p-4 space-y-2">
-              <p className="text-sm text-foreground">{t('onboarding.earningsPreview')}</p>
+              <p className="text-sm text-foreground">
+                {t('onboarding.earningsPreview', {
+                  exampleChars: EXAMPLE_UNITS * PRICING.UNIT_CHARS,
+                  exampleUnits: EXAMPLE_UNITS,
+                })}
+              </p>
               <div className="space-y-1">
                 <p className="font-display text-lg font-bold text-ember-3">
-                  {t('onboarding.perRequest')} {(selectedPrice * 2 * 0.9).toFixed(4)} SOL
+                  {t('onboarding.perRequest')} {(selectedPrice * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE).toFixed(4)} SOL
                 </p>
                 <p className="font-display text-lg font-bold text-ember-3">
-                  {t('onboarding.monthlyEstimate')} {(selectedPrice * 2 * 0.9 * 30 * 10).toFixed(2)} SOL
+                  {t('onboarding.monthlyEstimate')} {(selectedPrice * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE * 30 * 10).toFixed(2)} SOL
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">{t('onboarding.platformFeeNote')}</p>

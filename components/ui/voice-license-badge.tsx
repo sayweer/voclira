@@ -1,6 +1,7 @@
 'use client'
 
 import { MouseEvent, useEffect, useRef, useState } from 'react'
+import { translations } from '@/lib/translations'
 
 interface VoiceLicenseBadgeProps {
   href: string
@@ -171,7 +172,7 @@ export function VoiceLicenseBadge({ href, language }: VoiceLicenseBadgeProps) {
     'white',
   ]
 
-  const title = language === 'tr' ? 'Ses Solanada Lisanslandı' : 'Voice Licensed on Solana'
+  const title = translations[language].license.licensedTitle
 
   return (
     <a
