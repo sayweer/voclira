@@ -39,18 +39,16 @@ export type RefundStatus = 'none' | 'pending' | 'succeeded' | 'failed'
 
 export interface Purchase {
   id: string
-  // NOTE: buyer_wallet / tx_signature / amount_lamports / platform_fee_lamports are
-  // DB-nullable after the Faz 2 migration (card rows have no wallet/tx). They stay
-  // typed non-null here until Faz 4 introduces card drafts that actually set them
-  // null — at which point the analytics/RecentPurchaseRow consumers are updated too.
-  buyer_wallet: string
+  // Card purchases have no wallet / on-chain tx / lamports — these are null for them
+  // (crypto rows always set them). Analytics/CSV consumers coalesce to 0/''.
+  buyer_wallet: string | null
   creator_wallet: string
-  tx_signature: string
+  tx_signature: string | null
   fan_text: string
   audio_url: string | null
   status: PurchaseStatus
-  amount_lamports: number
-  platform_fee_lamports: number
+  amount_lamports: number | null
+  platform_fee_lamports: number | null
   play_count: number
   rejection_reason: string | null
   created_at: string

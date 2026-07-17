@@ -152,6 +152,14 @@ Configure your `.env.local` (see [`.env.local.example`](.env.local.example)):
 | `PLATFORM_WALLET` | Platform fee wallet address | Phantom wallet |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL | console.upstash.com |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token | console.upstash.com |
+| `NEXT_PUBLIC_CARD_PAYMENTS_ENABLED` | Card checkout feature flag — `true` to enable (off ⇒ crypto-only) | leave unset until card is live |
+| `PAYMENT_PROVIDER` | Card provider adapter (`stripe`) | defaults to `stripe` |
+| `STRIPE_SECRET_KEY` | Stripe secret key (card checkout + refunds) | dashboard.stripe.com |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | Stripe dashboard → Webhooks |
+| `NEXT_PUBLIC_APP_URL` | Public origin for Stripe success/cancel redirects | e.g. https://voclira.com |
+
+> Card payments are behind `NEXT_PUBLIC_CARD_PAYMENTS_ENABLED`. All the code ships, but the
+> flag stays off (crypto-only) until the Stripe account is live — no Stripe env is needed to run.
 
 ### Database Setup
 

@@ -8,6 +8,7 @@ import type {
   Purchase,
   PurchaseStatus,
   RecentPurchaseRow,
+  RefundStatus,
 } from '@/types'
 import { VocliraError, CreatorNotFoundError } from '@/lib/errors'
 
@@ -218,10 +219,11 @@ export interface PurchaseUpdateFields {
 /**
  * Update a purchase by its canonical UUID.
  *
- * Keyed by `id` (not tx_signature) so it also works for card purchases, which
- * have no on-chain signature. On 'completed', crypto sales credit the creator's
- * lamports stats via increment_creator_stats. (The card/fiat ledger credit is
- * wired in Faz 5 — no card purchases exist to complete before then.)
+ * Keyed by `id` (not tx_signature) so it also works for card purchases. On
+ * 'completed', crypto sales credit lamports stats (increment_creator_stats);
+ * card sales credit the fiat ledger (sale_credit) + usd stats. The ledger's
+ * unique (purchase_id, entry_type) index is the idempotency guard — a re-completed
+ * card sale is credited exactly once.
  */
 export async function updatePurchaseStatusById(
   id: string,
@@ -247,31 +249,169 @@ export async function updatePurchaseStatusById(
 
   if (updateError) dbError(`DB error: ${updateError.message}`)
 
-  if (status === 'completed') {
-    const { data: purchase, error: fetchError } = await supabase
-      .from('purchases')
-      .select('creator_wallet, amount_lamports, platform_fee_lamports')
-      .eq('id', id)
-      .single()
+  if (status !== 'completed') return
 
-    if (fetchError) dbError(`DB error: ${fetchError.message}`)
+  const { data: purchase, error: fetchError } = await supabase
+    .from('purchases')
+    .select('creator_wallet, payment_method, amount_lamports, platform_fee_lamports, amount_usd_cents, platform_fee_usd_cents')
+    .eq('id', id)
+    .single()
 
-    const p = purchase as {
-      creator_wallet: string
-      amount_lamports: number
-      platform_fee_lamports: number
-    }
+  if (fetchError) dbError(`DB error: ${fetchError.message}`)
 
-    const netLamports = p.amount_lamports - p.platform_fee_lamports
-
-    // Atomic increment via RPC — avoids race condition from read-modify-write
-    const { error: incError } = await supabase.rpc('increment_creator_stats', {
-      p_wallet: p.creator_wallet,
-      p_net_lamports: netLamports,
-    })
-
-    if (incError) dbError(`DB error: ${incError.message}`)
+  const p = purchase as {
+    creator_wallet: string
+    payment_method: 'crypto' | 'card'
+    amount_lamports: number | null
+    platform_fee_lamports: number | null
+    amount_usd_cents: number | null
+    platform_fee_usd_cents: number | null
   }
+
+  if (p.payment_method === 'card') {
+    const netUsdCents = (p.amount_usd_cents ?? 0) - (p.platform_fee_usd_cents ?? 0)
+    // Ledger credit first: its unique (purchase_id, entry_type) index makes this the
+    // single source of idempotency — a duplicate (23505) means already credited, so skip
+    // the stats bump to avoid double-counting.
+    const { error: ledgerError } = await supabase.from('creator_ledger_entries').insert({
+      creator_wallet: p.creator_wallet,
+      purchase_id: id,
+      entry_type: 'sale_credit',
+      amount_usd_cents: netUsdCents,
+    })
+    if (ledgerError) {
+      if (ledgerError.code === '23505') return
+      dbError(`DB error: ${ledgerError.message}`)
+    }
+    const { error: incError } = await supabase.rpc('increment_creator_stats_fiat', {
+      p_wallet: p.creator_wallet,
+      p_net_usd_cents: netUsdCents,
+    })
+    if (incError) dbError(`DB error: ${incError.message}`)
+    return
+  }
+
+  // Crypto: atomic lamports increment via RPC (avoids read-modify-write races).
+  const netLamports = (p.amount_lamports ?? 0) - (p.platform_fee_lamports ?? 0)
+  const { error: incError } = await supabase.rpc('increment_creator_stats', {
+    p_wallet: p.creator_wallet,
+    p_net_lamports: netLamports,
+  })
+  if (incError) dbError(`DB error: ${incError.message}`)
+}
+
+/**
+ * Optimistic status transition: only flips the row if it's still in `fromStatus`.
+ * Returns false (0 rows) if another request already moved it — the webhook and the
+ * client generate call both race to advance a card purchase, and only one may win.
+ */
+export async function transitionPurchase(
+  id: string,
+  fromStatus: PurchaseStatus,
+  toStatus: PurchaseStatus,
+  fields: { paidAt?: string; providerPaymentIntentId?: string } = {}
+): Promise<boolean> {
+  const payload: Record<string, unknown> = { status: toStatus }
+  if (fields.paidAt !== undefined) payload.paid_at = fields.paidAt
+  if (fields.providerPaymentIntentId !== undefined) {
+    payload.provider_payment_intent_id = fields.providerPaymentIntentId
+  }
+
+  const { data, error } = await supabase
+    .from('purchases')
+    .update(payload)
+    .eq('id', id)
+    .eq('status', fromStatus)
+    .select('id')
+
+  if (error) dbError(`DB error: ${error.message}`)
+  return (data?.length ?? 0) > 0
+}
+
+export async function getPurchaseByProviderPaymentId(
+  provider: string,
+  providerPaymentId: string
+): Promise<Purchase | null> {
+  const { data, error } = await supabase
+    .from('purchases')
+    .select('*')
+    .eq('provider', provider)
+    .eq('provider_payment_id', providerPaymentId)
+    .maybeSingle()
+
+  if (error) dbError(`DB error: ${error.message}`)
+  return (data as Purchase | null) ?? null
+}
+
+/** Lookup by the payment-intent id — used by refund webhooks (which carry the intent, not the checkout session). */
+export async function getPurchaseByProviderPaymentIntentId(
+  providerPaymentIntentId: string
+): Promise<Purchase | null> {
+  const { data, error } = await supabase
+    .from('purchases')
+    .select('*')
+    .eq('provider_payment_intent_id', providerPaymentIntentId)
+    .maybeSingle()
+
+  if (error) dbError(`DB error: ${error.message}`)
+  return (data as Purchase | null) ?? null
+}
+
+/** Insert a card purchase draft in 'pending_payment' (no wallet/tx/lamports). */
+export async function createCardDraftPurchase(data: {
+  creatorWallet: string
+  fanText: string
+  amountUsdCents: number
+  platformFeeUsdCents: number
+  processingFeeUsdCents: number
+  language: string
+  buyerEmail: string | null
+  provider: string
+}): Promise<Purchase> {
+  const { data: row, error } = await supabase
+    .from('purchases')
+    .insert({
+      creator_wallet: data.creatorWallet,
+      fan_text: data.fanText,
+      amount_usd_cents: data.amountUsdCents,
+      platform_fee_usd_cents: data.platformFeeUsdCents,
+      processing_fee_usd_cents: data.processingFeeUsdCents,
+      language: data.language,
+      buyer_email: data.buyerEmail,
+      provider: data.provider,
+      payment_method: 'card',
+      currency: 'USD',
+      status: 'pending_payment',
+    })
+    .select()
+    .single()
+
+  if (error) dbError(`DB error: ${error.message}`)
+  return row as Purchase
+}
+
+/** Attach the provider's checkout/payment id after the checkout session is created. */
+export async function setPurchaseProviderPaymentId(id: string, providerPaymentId: string): Promise<void> {
+  const { error } = await supabase
+    .from('purchases')
+    .update({ provider_payment_id: providerPaymentId })
+    .eq('id', id)
+
+  if (error) dbError(`DB error: ${error.message}`)
+}
+
+/** Record a refund's state (webhook or auto-refund on reject/fail). */
+export async function updatePurchaseRefund(
+  id: string,
+  refundStatus: RefundStatus,
+  refundId?: string
+): Promise<void> {
+  const payload: Record<string, unknown> = { refund_status: refundStatus }
+  if (refundStatus === 'succeeded') payload.refunded_at = new Date().toISOString()
+  if (refundId !== undefined) payload.refund_id = refundId
+
+  const { error } = await supabase.from('purchases').update(payload).eq('id', id)
+  if (error) dbError(`DB error: ${error.message}`)
 }
 
 export async function getCreatorStats(
@@ -388,17 +528,23 @@ export async function getCreatorAnalytics(
     const bucket = tsMap.get(date)
 
     if (row.status === 'completed') {
-      const net = row.amount_lamports - row.platform_fee_lamports
-      totalGross += row.amount_lamports
+      // Card rows have null lamports (their value lives in *_usd_cents; fiat analytics
+      // is Faz 7A). Coalesce to keep the SOL rollups correct for crypto rows.
+      const gross = row.amount_lamports ?? 0
+      const fee = row.platform_fee_lamports ?? 0
+      const net = gross - fee
+      totalGross += gross
       totalNet += net
-      totalFee += row.platform_fee_lamports
+      totalFee += fee
       totalCompleted += 1
       totalPlays += row.play_count
-      fanPurchaseCounts.set(row.buyer_wallet, (fanPurchaseCounts.get(row.buyer_wallet) ?? 0) + 1)
-      priceSum += row.amount_lamports
+      if (row.buyer_wallet) {
+        fanPurchaseCounts.set(row.buyer_wallet, (fanPurchaseCounts.get(row.buyer_wallet) ?? 0) + 1)
+      }
+      priceSum += gross
       priceCount += 1
       if (bucket) {
-        bucket.gross_lamports += row.amount_lamports
+        bucket.gross_lamports += gross
         bucket.net_lamports += net
         bucket.messages += 1
       }
@@ -429,9 +575,9 @@ export async function getCreatorAnalytics(
 
   const recent: RecentPurchaseRow[] = rows.slice(0, 100).map((row) => ({
     id: row.id,
-    buyer_wallet: row.buyer_wallet,
-    amount_lamports: row.amount_lamports,
-    platform_fee_lamports: row.platform_fee_lamports,
+    buyer_wallet: row.buyer_wallet ?? '',
+    amount_lamports: row.amount_lamports ?? 0,
+    platform_fee_lamports: row.platform_fee_lamports ?? 0,
     play_count: row.play_count,
     status: row.status,
     rejection_reason: row.rejection_reason,

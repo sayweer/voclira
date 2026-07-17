@@ -197,7 +197,7 @@ export default function PlayScreen({ purchase, creatorName }: PlayScreenProps) {
     return `${mins}:${String(secs).padStart(2, '0')}`;
   };
 
-  const amountSol = (purchase.amount_lamports / 1e9).toFixed(3);
+  const amountSol = ((purchase.amount_lamports ?? 0) / 1e9).toFixed(3);
 
   const statusLabel = (status: string) => {
     switch (status) {

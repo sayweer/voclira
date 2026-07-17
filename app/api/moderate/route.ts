@@ -24,10 +24,12 @@ const MOD_SESSION_TTL = 10 * 60 // 10 dk — ödeme için yeterli pencere
 
 interface ModerateRequest {
     creatorWallet: string
-    buyerWallet: string
+    // Required for crypto (binds the quote to the payer); absent for card fans (no wallet).
+    buyerWallet?: string
     text: string
     // Fan-selected generation language; defaults to the creator's declared language.
     language?: string
+    paymentMethod?: 'crypto' | 'card'
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -44,11 +46,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    const { creatorWallet, buyerWallet, text, language: rawLanguage } = body
-    if (!creatorWallet || !buyerWallet || typeof text !== 'string') {
+    const { creatorWallet, buyerWallet, text, language: rawLanguage, paymentMethod: rawPaymentMethod } = body
+    const paymentMethod = rawPaymentMethod === 'card' ? 'card' : 'crypto'
+
+    if (!creatorWallet || typeof text !== 'string') {
         return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 })
     }
-    if (!isValidWalletAddress(creatorWallet) || !isValidWalletAddress(buyerWallet)) {
+    if (!isValidWalletAddress(creatorWallet)) {
+        return NextResponse.json({ success: false, error: 'Invalid wallet address' }, { status: 400 })
+    }
+    // Crypto binds the quote to the buyer's wallet; card has no wallet.
+    if (paymentMethod === 'crypto') {
+        if (!buyerWallet || !isValidWalletAddress(buyerWallet)) {
+            return NextResponse.json({ success: false, error: 'Invalid wallet address' }, { status: 400 })
+        }
+    } else if (buyerWallet && !isValidWalletAddress(buyerWallet)) {
         return NextResponse.json({ success: false, error: 'Invalid wallet address' }, { status: 400 })
     }
 
@@ -87,8 +99,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             throw moderationError
         }
 
-        // USD-primary quote: lock the SOL amount at the current rate for the payment
-        // window, so a fan who paid off the quote can't be under-charged by a later swing.
+        // Card fans pay in USD (no rate needed) — just bind the approved text to a
+        // one-time session for /api/checkout/card to consume.
+        if (paymentMethod === 'card') {
+            const moderationSessionId = await createSession(
+                MOD_SESSION_PREFIX,
+                {
+                    buyerWallet: buyerWallet ?? null,
+                    creatorWallet,
+                    rawTextHash: hashUserText(text),
+                    language,
+                },
+                MOD_SESSION_TTL
+            )
+            return NextResponse.json({
+                success: true,
+                approved: true,
+                moderationSessionId,
+                language,
+                maxLength: maxTextLengthFor(language),
+            })
+        }
+
+        // Crypto: USD-primary quote — lock the SOL amount at the current rate for the
+        // payment window, so a fan who paid off the quote can't be under-charged by a swing.
         const priceUsdCents = creator.price_usd_cents
         if (priceUsdCents == null) {
             return NextResponse.json(
