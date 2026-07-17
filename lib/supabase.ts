@@ -200,8 +200,16 @@ export interface PurchaseUpdateFields {
   errorMessage?: string
 }
 
-export async function updatePurchaseStatus(
-  txSignature: string,
+/**
+ * Update a purchase by its canonical UUID.
+ *
+ * Keyed by `id` (not tx_signature) so it also works for card purchases, which
+ * have no on-chain signature. On 'completed', crypto sales credit the creator's
+ * lamports stats via increment_creator_stats. (The card/fiat ledger credit is
+ * wired in Faz 5 — no card purchases exist to complete before then.)
+ */
+export async function updatePurchaseStatusById(
+  id: string,
   status: PurchaseStatus,
   fields: PurchaseUpdateFields = {}
 ): Promise<void> {
@@ -220,7 +228,7 @@ export async function updatePurchaseStatus(
   const { error: updateError } = await supabase
     .from('purchases')
     .update(payload)
-    .eq('tx_signature', txSignature)
+    .eq('id', id)
 
   if (updateError) dbError(`DB error: ${updateError.message}`)
 
@@ -228,7 +236,7 @@ export async function updatePurchaseStatus(
     const { data: purchase, error: fetchError } = await supabase
       .from('purchases')
       .select('creator_wallet, amount_lamports, platform_fee_lamports')
-      .eq('tx_signature', txSignature)
+      .eq('id', id)
       .single()
 
     if (fetchError) dbError(`DB error: ${fetchError.message}`)

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { getCreatorByWallet, savePurchase, updatePurchaseStatus, getPurchaseByTxSignature } from '@/lib/supabase'
+import { getCreatorByWallet, savePurchase, updatePurchaseStatusById, getPurchaseByTxSignature } from '@/lib/supabase'
 import { verifyTransaction } from '@/lib/solana'
 import { isSafeToGenerate, validateTextLengthForLanguage, hashUserText, normalizeLanguage } from '@/lib/moderation'
 import { generateSpeech } from '@/lib/tts'
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         })
       } catch (moderationError) {
         if (moderationError instanceof UnsafeContentError) {
-          await updatePurchaseStatus(txSignature, 'rejected', {
+          await updatePurchaseStatusById(purchase.id, 'rejected', {
             rejectionReason: `${moderationError.category}: ${moderationError.reason}`,
           })
           return NextResponse.json(
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const bytes = new Uint8Array(await res.arrayBuffer())
       const audioUrl = await uploadPublicObject(`purchases/${randomUUID()}.${ext}`, bytes, contentType)
 
-      await updatePurchaseStatus(txSignature, 'completed', {
+      await updatePurchaseStatusById(purchase.id, 'completed', {
         audioUrl,
         generationEngine: engine,
         providerRequestId: tts.requestId,
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const providerErrorType = postSaveError instanceof TtsError ? 'tts' : 'internal'
       const errorMessage = postSaveError instanceof Error ? postSaveError.message : String(postSaveError)
       try {
-        await updatePurchaseStatus(txSignature, 'failed', { errorMessage, providerErrorType })
+        await updatePurchaseStatusById(purchase.id, 'failed', { errorMessage, providerErrorType })
       } catch (reconcileErr) {
         console.error('[VoiceGenerate] Failed to reconcile pending purchase:', reconcileErr)
       }
