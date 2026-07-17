@@ -158,7 +158,7 @@ export interface ModerationResult {
 export interface RegisterCreatorRequest {
   walletAddress: string
   creatorName: string
-  priceInLamports: number
+  priceInUsdCents: number
   language?: string
   // Chatterbox/Fal onboarding: reference + consent WAVs are uploaded to R2 first;
   // register consumes the one-time upload sessions instead of receiving base64 audio.

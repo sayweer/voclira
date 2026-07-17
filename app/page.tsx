@@ -73,7 +73,8 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [audioReady, setAudioReady] = useState(false);
-  const [selectedPrice, setSelectedPrice] = useState(0.05);
+  // USD-primary (Faz 3): price is USD cents, e.g. 300 = $3. Default $3.
+  const [selectedPrice, setSelectedPrice] = useState(300);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [isCheckingDB, setIsCheckingDB] = useState(false)
@@ -84,7 +85,7 @@ export default function App() {
   const [creatorStats, setCreatorStats] = useState<{
     totalEarned: number
     totalMessages: number
-    priceInLamports: number
+    priceUsdCents: number
     hasVoice: boolean
     nftMint: string | null
   } | null>(null)
@@ -169,7 +170,7 @@ export default function App() {
           setCreatorStats({
             totalEarned: creator.total_earned,
             totalMessages: creator.total_messages,
-            priceInLamports: creator.price_lamports,
+            priceUsdCents: creator.price_usd_cents ?? 300,
             // A creator is "ready" the moment a zero-shot reference exists —
             // the legacy ElevenLabs voice_id is meaningless for new profiles.
             hasVoice: Boolean(creator.voice_profile_object_key),
@@ -178,7 +179,7 @@ export default function App() {
           setBlockAdult(creator.block_adult ?? true)
           setBlockProfanity(creator.block_profanity ?? true)
           setBlockPolitical(creator.block_political ?? true)
-          setSelectedPrice(creator.price_lamports / 1_000_000_000)
+          setSelectedPrice(creator.price_usd_cents ?? 300)
 
           if (
             creator.block_adult == null ||
@@ -363,7 +364,7 @@ export default function App() {
       const body: RegisterCreatorRequest = {
         walletAddress: walletAddr,
         creatorName: walletAddr.slice(0, 8),
-        priceInLamports: Math.round(selectedPrice * 1_000_000_000),
+        priceInUsdCents: selectedPrice,
         language,
         uploadSessionId,
         verificationUploadSessionId,
@@ -524,9 +525,7 @@ export default function App() {
         <Dashboard
           walletAddress={walletAddress}
           creatorStats={creatorStats}
-          priceInSol={creatorStats?.priceInLamports
-            ? (creatorStats.priceInLamports / 1_000_000_000).toFixed(4)
-            : selectedPrice.toFixed(4)}
+          priceLabel={`$${((creatorStats?.priceUsdCents ?? selectedPrice) / 100).toFixed(2)}`}
           copiedLink={copiedLink}
           onOpenSettings={() => setSettingsOpen(true)}
           onCopyLink={handleCopyLink}
@@ -559,8 +558,8 @@ export default function App() {
         onPriceUpdate={(newPrice) => {
           setSelectedPrice(newPrice);
         }}
-        onPriceUpdateSuccess={(newLamports) => {
-          setCreatorStats(prev => prev ? { ...prev, priceInLamports: newLamports } : null);
+        onPriceUpdateSuccess={(newCents) => {
+          setCreatorStats(prev => prev ? { ...prev, priceUsdCents: newCents } : null);
         }}
         blockAdult={blockAdult}
         blockProfanity={blockProfanity}

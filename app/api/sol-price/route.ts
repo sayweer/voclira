@@ -1,26 +1,17 @@
 import { NextResponse } from 'next/server'
 import { PRICING } from '@/lib/limits'
+import { getSolUsdRate } from '@/lib/exchange-rate'
 
-export const revalidate = 180
-
-const FALLBACK_USD = PRICING.SOL_USD_FALLBACK
+// Cosmetic display rate for the client. Shares lib/exchange-rate's 60s Redis cache
+// with the crypto quote path, so the "≈ SOL" preview matches the checkout rate and
+// providers aren't hit on every page load.
+export const dynamic = 'force-dynamic'
 
 export async function GET(): Promise<NextResponse> {
   try {
-    const res = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-      { next: { revalidate: 180 } }
-    )
-    if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`)
-
-    const json = (await res.json()) as { solana?: { usd?: number } }
-    const usd = json.solana?.usd
-    if (typeof usd !== 'number' || !Number.isFinite(usd) || usd <= 0) {
-      throw new Error('Invalid price payload')
-    }
-
-    return NextResponse.json({ usd, stale: false })
+    const rate = await getSolUsdRate()
+    return NextResponse.json({ usd: rate.rateUsdPerSol, stale: rate.source === 'last-good' })
   } catch {
-    return NextResponse.json({ usd: FALLBACK_USD, stale: true })
+    return NextResponse.json({ usd: PRICING.SOL_USD_FALLBACK, stale: true })
   }
 }

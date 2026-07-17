@@ -11,7 +11,7 @@ import { WavePath } from '@/components/ui/wave-path';
 import { AudioUpload } from '@/components/onboarding/AudioUpload';
 import { ConsentStep } from '@/components/onboarding/ConsentStep';
 import { translations } from '@/lib/translations';
-import { RECORDING, PRICING } from '@/lib/limits';
+import { RECORDING, PRICING, PRICING_USD } from '@/lib/limits';
 import { pickSupportedAudioMime, DEFAULT_AUDIO_MIME } from '@/lib/audio-mime';
 
 interface OnboardingProps {
@@ -611,32 +611,33 @@ export default function Onboarding({
               </p>
             </div>
 
-            {/* Price Options */}
-            <div className="grid grid-cols-5 gap-2">
-              {PRICING.PRICE_OPTIONS_SOL.map((price) => (
+            {/* Price Options (USD-primary; approx SOL shown for crypto fans) */}
+            <div className="grid grid-cols-3 gap-2">
+              {PRICING_USD.PRICE_OPTIONS_USD_CENTS.map((cents) => (
                 <button
-                  key={price}
-                  onClick={() => onSelectPrice(price)}
+                  key={cents}
+                  onClick={() => onSelectPrice(cents)}
                   className={`p-3 rounded-lg border transition-all ${
-                    selectedPrice === price
+                    selectedPrice === cents
                       ? 'bg-primary border-primary text-primary-foreground scale-105'
                       : 'border-border bg-background hover:border-primary/50'
                   }`}
                 >
-                  <div className="font-semibold">{price}</div>
+                  <div className="font-semibold">${cents / 100}</div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {t('onboarding.charsPerUnit', { unitChars: PRICING.UNIT_CHARS })}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    ${(price * (solUsd ?? PRICING.SOL_USD_FALLBACK)).toFixed(2)}
+                    ≈ {(cents / 100 / (solUsd ?? PRICING.SOL_USD_FALLBACK)).toFixed(3)} SOL
                   </div>
                 </button>
               ))}
             </div>
 
             {/* Info Row */}
-            <div className="text-center text-sm text-muted-foreground">
-              {t('onboarding.mostCreators', { unitChars: PRICING.UNIT_CHARS })}
+            <div className="text-center text-sm text-muted-foreground space-y-1">
+              <p>{t('onboarding.mostCreators', { unitChars: PRICING.UNIT_CHARS })}</p>
+              <p className="text-xs">{t('onboarding.priceUsdHint')}</p>
             </div>
 
             <WavePath className="my-3 text-ember-3/30" />
@@ -651,10 +652,10 @@ export default function Onboarding({
               </p>
               <div className="space-y-1">
                 <p className="font-display text-lg font-bold text-ember-3">
-                  {t('onboarding.perRequest')} {(selectedPrice * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE).toFixed(4)} SOL
+                  {t('onboarding.perRequest')} ${((selectedPrice / 100) * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE).toFixed(2)}
                 </p>
                 <p className="font-display text-lg font-bold text-ember-3">
-                  {t('onboarding.monthlyEstimate')} {(selectedPrice * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE * 30 * 10).toFixed(2)} SOL
+                  {t('onboarding.monthlyEstimate')} ${((selectedPrice / 100) * EXAMPLE_UNITS * PRICING.CREATOR_SHARE_RATE * 30 * 10).toFixed(2)}
                 </p>
               </div>
               <p className="text-xs text-muted-foreground">{t('onboarding.platformFeeNote')}</p>

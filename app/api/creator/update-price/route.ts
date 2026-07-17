@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCreatorByWallet, updateCreatorPrice } from '@/lib/supabase'
 import { getErrorResponse } from '@/lib/errors'
-import { safeParseJson, isValidWalletAddress, isValidPrice } from '@/lib/validation'
+import { safeParseJson, isValidWalletAddress } from '@/lib/validation'
+import { PRICING_USD, isValidPriceUsdCents } from '@/lib/limits'
 import { verifyWalletAuthOrSession } from '@/lib/auth'
 
 interface UpdatePriceBody {
   walletAddress?: string
-  priceInLamports?: number
+  priceInUsdCents?: number
 }
 
 export async function PATCH(req: NextRequest): Promise<NextResponse> {
@@ -16,9 +17,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { walletAddress, priceInLamports } = body
+  const { walletAddress, priceInUsdCents } = body
 
-  if (!walletAddress || priceInLamports === undefined) {
+  if (!walletAddress || priceInUsdCents === undefined) {
     return NextResponse.json(
       { error: 'Missing required fields' },
       { status: 400 }
@@ -29,9 +30,9 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid wallet address' }, { status: 400 })
   }
 
-  if (!isValidPrice(priceInLamports)) {
+  if (!isValidPriceUsdCents(priceInUsdCents)) {
     return NextResponse.json(
-      { error: 'Price must be between 0.01 and 0.1 SOL per 150 characters' },
+      { error: `Price must be between $${PRICING_USD.MIN_PRICE_USD_CENTS / 100} and $${PRICING_USD.MAX_PRICE_USD_CENTS / 100} per 150 characters` },
       { status: 400 }
     )
   }
@@ -48,7 +49,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Creator not found or inactive' }, { status: 404 })
     }
 
-    await updateCreatorPrice(walletAddress, priceInLamports)
+    await updateCreatorPrice(walletAddress, priceInUsdCents)
 
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {

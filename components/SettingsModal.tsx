@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { SlideButton } from '@/components/ui/slide-button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/components/LanguageProvider';
-import { PRICING } from '@/lib/limits';
+import { PRICING, PRICING_USD, isValidPriceUsdCents } from '@/lib/limits';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -17,8 +17,8 @@ interface SettingsModalProps {
   selectedPrice: number;
   onDisconnect: () => void;
   onRerecord: () => void;
-  onPriceUpdate: (price: number) => void;
-  onPriceUpdateSuccess: (newLamports: number) => void;
+  onPriceUpdate: (priceUsdCents: number) => void;
+  onPriceUpdateSuccess: (newCents: number) => void;
   blockAdult: boolean;
   blockProfanity: boolean;
   blockPolitical: boolean;
@@ -75,9 +75,12 @@ export default function SettingsModal({
   }, [isOpen, onClose]);
 
   const handlePriceUpdate = async () => {
-    // Number.isFinite also rejects the NaN an emptied input produces.
-    if (!Number.isFinite(newPrice) || newPrice < PRICING.MIN_PRICE_SOL || newPrice > PRICING.MAX_PRICE_SOL) {
-      setPriceError(t('settings.priceRangeError', { min: PRICING.MIN_PRICE_SOL, max: PRICING.MAX_PRICE_SOL }));
+    // newPrice is USD cents; isValidPriceUsdCents also rejects the NaN an emptied input produces.
+    if (!isValidPriceUsdCents(newPrice)) {
+      setPriceError(t('settings.priceRangeError', {
+        min: PRICING_USD.MIN_PRICE_USD_CENTS / 100,
+        max: PRICING_USD.MAX_PRICE_USD_CENTS / 100,
+      }));
       return;
     }
     setIsUpdating(true);
@@ -95,7 +98,7 @@ export default function SettingsModal({
           },
           body: JSON.stringify({
             walletAddress,
-            priceInLamports: Math.round(newPrice * 1_000_000_000),
+            priceInUsdCents: newPrice,
           }),
         });
 
@@ -108,7 +111,7 @@ export default function SettingsModal({
         if (res.ok) {
           setPriceSuccess(true);
           onPriceUpdate(newPrice);
-          onPriceUpdateSuccess(Math.round(newPrice * 1_000_000_000));
+          onPriceUpdateSuccess(newPrice);
           setTimeout(() => setPriceSuccess(false), 3000);
         } else {
           setPriceError(t('settings.updateFailed'));
@@ -207,15 +210,15 @@ export default function SettingsModal({
                 ) : (
                   <input
                     type="number"
-                    min={PRICING.MIN_PRICE_SOL}
-                    max={PRICING.MAX_PRICE_SOL}
-                    step={0.01}
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(parseFloat(e.target.value))}
+                    min={PRICING_USD.MIN_PRICE_USD_CENTS / 100}
+                    max={PRICING_USD.MAX_PRICE_USD_CENTS / 100}
+                    step={0.5}
+                    value={Number.isFinite(newPrice) ? newPrice / 100 : ''}
+                    onChange={(e) => setNewPrice(Math.round(parseFloat(e.target.value) * 100))}
                     className="w-20 bg-input border border-voclira-night/20 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-voclira-olive focus:ring-2 focus:ring-voclira-olive/25 transition-colors"
                   />
                 )}
-                <span className="text-sm text-muted-foreground">SOL</span>
+                <span className="text-sm text-muted-foreground">USD</span>
                 <Button
                   onClick={handlePriceUpdate}
                   disabled={isUpdating || statsLoading}

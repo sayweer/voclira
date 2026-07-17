@@ -11,6 +11,8 @@ import { createSession } from '@/lib/session'
 import { getErrorResponse, UnsafeContentError } from '@/lib/errors'
 import { safeParseJson, isValidWalletAddress, getClientIp } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { priceUnitsFor, usdCentsToLamports } from '@/lib/limits'
+import { getSolUsdRate, isRateTooStale } from '@/lib/exchange-rate'
 
 export const maxDuration = 15
 
@@ -85,10 +87,55 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             throw moderationError
         }
 
-        // Approved → bind the raw text + buyer + creator to a one-time session.
+        // USD-primary quote: lock the SOL amount at the current rate for the payment
+        // window, so a fan who paid off the quote can't be under-charged by a later swing.
+        const priceUsdCents = creator.price_usd_cents
+        if (priceUsdCents == null) {
+            return NextResponse.json(
+                { success: false, error: 'Creator price not configured', code: 'PRICE_NOT_SET' },
+                { status: 409 }
+            )
+        }
+        const amountUsdCents = priceUnitsFor(text) * priceUsdCents
+
+        let rate
+        try {
+            rate = await getSolUsdRate()
+        } catch {
+            return NextResponse.json(
+                { success: false, error: 'Exchange rate unavailable, please try again shortly', code: 'RATE_UNAVAILABLE' },
+                { status: 503 }
+            )
+        }
+        // Fail-closed: never price a crypto checkout off a rate older than the max age.
+        if (isRateTooStale(rate)) {
+            return NextResponse.json(
+                { success: false, error: 'Exchange rate unavailable, please try again shortly', code: 'RATE_UNAVAILABLE' },
+                { status: 503 }
+            )
+        }
+        const quotedLamports = usdCentsToLamports(amountUsdCents, rate.rateUsdPerSol)
+        if (quotedLamports <= 0) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid price', code: 'INVALID_PRICE' },
+                { status: 500 }
+            )
+        }
+        const quotedAt = Date.now()
+
+        // Approved → bind the raw text + buyer + creator + locked quote to a one-time session.
         const moderationSessionId = await createSession(
             MOD_SESSION_PREFIX,
-            { buyerWallet, creatorWallet, rawTextHash: hashUserText(text), language },
+            {
+                buyerWallet,
+                creatorWallet,
+                rawTextHash: hashUserText(text),
+                language,
+                amountUsdCents,
+                quotedLamports,
+                rateUsdPerSol: rate.rateUsdPerSol,
+                quotedAt,
+            },
             MOD_SESSION_TTL
         )
 
@@ -98,6 +145,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             moderationSessionId,
             language,
             maxLength: maxTextLengthFor(language),
+            quote: {
+                amountUsdCents,
+                lamports: quotedLamports,
+                rateUsdPerSol: rate.rateUsdPerSol,
+                expiresAt: quotedAt + MOD_SESSION_TTL * 1000,
+            },
         })
     } catch (error) {
         const { error: message, code, statusCode } = getErrorResponse(error)

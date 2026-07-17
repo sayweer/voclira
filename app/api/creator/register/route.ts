@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCreatorByWallet, saveCreator } from '@/lib/supabase'
 import { getPrivateObjectSize } from '@/lib/r2'
-import { RECORDING, REFERENCE_AUDIO } from '@/lib/limits'
+import { RECORDING, REFERENCE_AUDIO, PRICING_USD, isValidPriceUsdCents } from '@/lib/limits'
 import { consumeSession } from '@/lib/session'
 import { getErrorResponse } from '@/lib/errors'
-import { safeParseJson, isValidWalletAddress, isValidPrice, getClientIp } from '@/lib/validation'
+import { safeParseJson, isValidWalletAddress, getClientIp } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
 import type { RegisterCreatorRequest } from '@/types'
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const {
     walletAddress,
     creatorName,
-    priceInLamports,
+    priceInUsdCents,
     language,
     uploadSessionId,
     verificationUploadSessionId,
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (
     !walletAddress ||
     !creatorName ||
-    priceInLamports === undefined ||
+    priceInUsdCents === undefined ||
     !uploadSessionId ||
     !verificationUploadSessionId ||
     !consentTextVersion
@@ -60,8 +60,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (typeof creatorName !== 'string' || creatorName.trim().length < 1 || creatorName.trim().length > 100) {
     return NextResponse.json({ success: false, error: 'Creator name must be 1-100 characters' }, { status: 400 })
   }
-  if (!isValidPrice(priceInLamports)) {
-    return NextResponse.json({ success: false, error: 'Price must be between 0.01 and 0.1 SOL' }, { status: 400 })
+  if (!isValidPriceUsdCents(priceInUsdCents)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: `Price must be between $${PRICING_USD.MIN_PRICE_USD_CENTS / 100} and $${PRICING_USD.MAX_PRICE_USD_CENTS / 100}`,
+      },
+      { status: 400 }
+    )
   }
   const lang = language === 'tr' ? 'tr' : 'en'
 
@@ -122,7 +128,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const creator = await saveCreator({
       walletAddress,
       creatorName,
-      priceInLamports,
+      priceUsdCents: priceInUsdCents,
       language: lang,
       voiceProfileObjectKey: voiceSession.objectKey,
       consentAt: new Date().toISOString(),

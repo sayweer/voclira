@@ -9,7 +9,8 @@ import { consumeSession } from '@/lib/session'
 import { getErrorResponse, UnsafeContentError, TtsError } from '@/lib/errors'
 import { safeParseJson, isValidWalletAddress, isValidTxSignature, getClientIp } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
-import { priceUnitsFor, platformFeeLamports } from '@/lib/limits'
+import { priceUnitsFor, platformFeeLamports, platformFeeUsdCents, usdCentsToLamports, QUOTE } from '@/lib/limits'
+import { getSolUsdRate } from '@/lib/exchange-rate'
 import type { GenerateVoiceRequest } from '@/types'
 
 // Fal warm pool returns in 2-5s; fail fast rather than burn provisioned memory / show a long spinner.
@@ -21,6 +22,11 @@ interface ModerationSession {
   creatorWallet: string
   rawTextHash: string
   language: string
+  // USD-primary quote locked at moderation time (Faz 3).
+  amountUsdCents: number
+  quotedLamports: number
+  rateUsdPerSol: number
+  quotedAt: number
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -90,8 +96,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const language = normalizeLanguage(rawLanguage, normalizeLanguage(creator.language))
 
     // Optional moderation session: if the fan went through /api/moderate (pre-payment),
-    // enforce that the approved raw text + parties match. Generation ALWAYS re-moderates
-    // below, so a missing session is safe (back-compat) — the session only adds a lock.
+    // enforce that the approved raw text + parties match, and reuse its locked quote.
+    // Generation ALWAYS re-moderates below, so a missing session is safe (back-compat) —
+    // the session only adds a lock and the exact quoted amount.
+    let quotedLamports: number | null = null
+    let quotedAmountUsdCents: number | null = null
     if (moderationSessionId) {
       const session = await consumeSession<ModerationSession>(MOD_SESSION_PREFIX, moderationSessionId)
       if (
@@ -105,14 +114,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           { status: 409 }
         )
       }
+      quotedLamports = typeof session.quotedLamports === 'number' ? session.quotedLamports : null
+      quotedAmountUsdCents = typeof session.amountUsdCents === 'number' ? session.amountUsdCents : null
     }
 
     validateTextLengthForLanguage(fanText, language)
 
-    // Multi-unit pricing: the fan pays ceil(len / UNIT_CHARS) × unit price —
-    // the exact formula the client uses, so the on-chain amount is enforced
-    // and the recorded amount matches what was actually paid.
-    const expectedTotalLamports = priceUnitsFor(fanText) * creator.price_lamports
+    // USD-primary: the fan's SOL amount was locked into the quote at moderation time.
+    const priceUsdCents = creator.price_usd_cents
+    if (priceUsdCents == null) {
+      return NextResponse.json(
+        { success: false, error: 'Creator price not configured', code: 'PRICE_NOT_SET' },
+        { status: 409 }
+      )
+    }
+    const units = priceUnitsFor(fanText)
+    const amountUsdCents = quotedAmountUsdCents ?? units * priceUsdCents
+    const feeUsdCents = platformFeeUsdCents(amountUsdCents)
+
+    // Prefer the exact quoted lamports (normal path). Without a session (e.g. a
+    // MOD_SESSION_INVALID retry) recompute from the live rate with slack for drift.
+    let expectedTotalLamports: number
+    if (quotedLamports != null) {
+      expectedTotalLamports = quotedLamports
+    } else {
+      const rate = await getSolUsdRate()
+      expectedTotalLamports = Math.floor(
+        usdCentsToLamports(units * priceUsdCents, rate.rateUsdPerSol) * (1 - QUOTE.NO_SESSION_TOLERANCE)
+      )
+    }
     await verifyTransaction(txSignature, creatorWallet, expectedTotalLamports, buyerWallet)
 
     const purchase = await savePurchase({
@@ -122,6 +152,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       fanText,
       amountLamports: expectedTotalLamports,
       platformFeeLamports: platformFeeLamports(expectedTotalLamports),
+      amountUsdCents,
+      platformFeeUsdCents: feeUsdCents,
+      language,
+      currency: 'SOL',
+      paymentMethod: 'crypto',
     })
 
     // Purchase row now exists ('pending'). Any failure below transitions it to

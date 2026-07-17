@@ -43,7 +43,9 @@ export async function saveCreator(data: {
   // voiceId is legacy (ElevenLabs). Chatterbox/Fal creators have no voice_id and
   // instead store a zero-shot reference at voiceProfileObjectKey. Defaults to '' (NOT NULL).
   voiceId?: string
-  priceInLamports: number
+  // USD-primary (Faz 3): price stored in cents; price_lamports is left at its DB
+  // default (0) and derived per-checkout from the live rate.
+  priceUsdCents: number
   language?: string
   isActive?: boolean
   // Chatterbox/Fal migration + consent.
@@ -57,7 +59,7 @@ export async function saveCreator(data: {
     wallet_address: data.walletAddress,
     creator_name: data.creatorName,
     voice_id: data.voiceId ?? '',
-    price_lamports: data.priceInLamports,
+    price_usd_cents: data.priceUsdCents,
     language: data.language ?? 'en',
     is_active: data.isActive ?? true,
     block_adult: true,
@@ -100,10 +102,10 @@ export async function getPurchaseByTxSignature(txSignature: string): Promise<Pur
   return (data as Purchase | null) ?? null
 }
 
-export async function updateCreatorPrice(walletAddress: string, priceInLamports: number): Promise<void> {
+export async function updateCreatorPrice(walletAddress: string, priceUsdCents: number): Promise<void> {
   const { error } = await supabase
     .from('creators')
-    .update({ price_lamports: priceInLamports })
+    .update({ price_usd_cents: priceUsdCents })
     .eq('wallet_address', walletAddress)
 
   if (error) throw new VocliraError('Failed to update price', 'DB_ERROR', 500)
@@ -159,22 +161,35 @@ export async function savePurchase(data: {
   fanText: string
   amountLamports: number
   platformFeeLamports: number
+  // USD-primary bookkeeping (Faz 3). Recorded alongside the lamports for crypto sales.
+  amountUsdCents?: number
+  platformFeeUsdCents?: number
+  language?: string
+  currency?: string
+  paymentMethod?: 'crypto' | 'card'
 }): Promise<Purchase> {
   // Insert; if the tx_signature already exists (unique constraint, Postgres 23505),
   // fetch and return the existing row instead. This makes the operation idempotent
   // and prevents the TOCTOU race where two concurrent requests both pass the
   // `getPurchaseByTxSignature → null` check and try to insert.
+  const insertPayload: Record<string, unknown> = {
+    buyer_wallet: data.buyerWallet,
+    creator_wallet: data.creatorWallet,
+    tx_signature: data.txSignature,
+    fan_text: data.fanText,
+    amount_lamports: data.amountLamports,
+    platform_fee_lamports: data.platformFeeLamports,
+    status: 'pending',
+  }
+  if (data.amountUsdCents !== undefined) insertPayload.amount_usd_cents = data.amountUsdCents
+  if (data.platformFeeUsdCents !== undefined) insertPayload.platform_fee_usd_cents = data.platformFeeUsdCents
+  if (data.language !== undefined) insertPayload.language = data.language
+  if (data.currency !== undefined) insertPayload.currency = data.currency
+  if (data.paymentMethod !== undefined) insertPayload.payment_method = data.paymentMethod
+
   const { data: row, error } = await supabase
     .from('purchases')
-    .insert({
-      buyer_wallet: data.buyerWallet,
-      creator_wallet: data.creatorWallet,
-      tx_signature: data.txSignature,
-      fan_text: data.fanText,
-      amount_lamports: data.amountLamports,
-      platform_fee_lamports: data.platformFeeLamports,
-      status: 'pending',
-    })
+    .insert(insertPayload)
     .select()
     .single()
 

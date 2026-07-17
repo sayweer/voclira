@@ -65,11 +65,12 @@ interface DashboardProps {
   creatorStats: {
     totalEarned: number
     totalMessages: number
-    priceInLamports: number
+    priceUsdCents: number
     hasVoice: boolean
     nftMint: string | null
   } | null;
-  priceInSol: string;
+  /** Pre-formatted USD price label, e.g. "$3.00". */
+  priceLabel: string;
   copiedLink: boolean;
   onOpenSettings: () => void;
   onCopyLink: () => void;
@@ -79,7 +80,7 @@ interface DashboardProps {
 export default function Dashboard({
   walletAddress,
   creatorStats,
-  priceInSol,
+  priceLabel,
   copiedLink,
   onOpenSettings,
   onCopyLink,
@@ -373,7 +374,7 @@ export default function Dashboard({
                   <div className="flex items-start justify-between">
                     <div>
                       <p className="font-display text-xs uppercase tracking-[0.25em] text-muted-foreground mb-2">{t('dashboard.pricePer150', { unitChars: PRICING.UNIT_CHARS })}</p>
-                      <h3 className="font-display text-4xl font-bold">{priceInSol} SOL</h3>
+                      <h3 className="font-display text-4xl font-bold">{priceLabel}</h3>
                       <p className="text-muted-foreground text-sm mt-1">{t('dashboard.currentRate')}</p>
                     </div>
                     <Coins className="w-6 h-6 text-voclira-terracotta" />

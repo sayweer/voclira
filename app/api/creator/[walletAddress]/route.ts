@@ -21,7 +21,7 @@ function jsonNoStore<T>(body: T, status: number): NextResponse {
 /** Public-safe fields that can be returned to fans */
 interface PublicCreatorInfo {
   creator_name: string
-  price_lamports: number
+  price_usd_cents: number | null
   is_active: boolean
   language: string
   has_voice: boolean
@@ -49,7 +49,7 @@ export async function GET(
     if (isPublic) {
       const publicInfo: PublicCreatorInfo = {
         creator_name: creator.creator_name,
-        price_lamports: creator.price_lamports,
+        price_usd_cents: creator.price_usd_cents,
         is_active: creator.is_active,
         language: creator.language,
         // Zero-shot Chatterbox: a creator can generate as soon as their reference WAV exists.

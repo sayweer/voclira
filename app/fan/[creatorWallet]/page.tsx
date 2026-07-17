@@ -5,7 +5,6 @@ import { useState, useEffect, useRef } from 'react'
 import { MotionConfig, motion } from 'framer-motion'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/WalletButton'
-import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { Mic } from 'lucide-react'
 import { useLanguage } from '@/components/LanguageProvider'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -19,7 +18,7 @@ import type { SupportedLanguage } from '@/types'
 interface Creator {
   wallet_address: string
   creator_name: string
-  price_lamports: number
+  price_usd_cents: number | null
   is_active: boolean
   language: string
 }
@@ -49,6 +48,8 @@ export default function FanPage() {
   const [txSignature, setTxSignature] = useState<string | null>(null)
   const [purchaseId, setPurchaseId] = useState<string | null>(null)
   const [platformWallet, setPlatformWallet] = useState<string | null>(null)
+  // Cosmetic display rate for "≈ SOL"; the actual charge is the server-locked quote.
+  const [solUsd, setSolUsd] = useState<number | null>(null)
 
   // Fetch creator on mount
   useEffect(() => {
@@ -89,14 +90,27 @@ export default function FanPage() {
     fetchPlatformConfig()
   }, [])
 
-  // Language-dependent limits + price calculation — single source: lib/limits.ts
+  // Cosmetic SOL/USD rate for the "≈ SOL" preview (payment uses the locked quote).
+  useEffect(() => {
+    fetch('/api/sol-price')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.usd === 'number') setSolUsd(data.usd)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Language-dependent limits + USD-primary price display — single source: lib/limits.ts
   const maxLen = maxTextLengthFor(selectedLanguage)
   const overLimit = message.length > maxLen
   const tooShort = message.trim().length > 0 && message.trim().length < TEXT.MIN_LENGTH
   const charUnits = priceUnitsFor(message)
-  const totalLamports = charUnits * (creator?.price_lamports ?? 0)
-  const totalSol = (totalLamports / LAMPORTS_PER_SOL).toFixed(4)
-  const pricePerUnit = ((creator?.price_lamports ?? 0) / LAMPORTS_PER_SOL).toFixed(4)
+  const priceUsdCents = creator?.price_usd_cents ?? null
+  const totalUsdCents = priceUsdCents != null ? charUnits * priceUsdCents : 0
+  const priceUsdLabel = priceUsdCents != null ? (priceUsdCents / 100).toFixed(2) : '—'
+  const totalUsdLabel = (totalUsdCents / 100).toFixed(2)
+  const approxSol =
+    solUsd && totalUsdCents > 0 ? (totalUsdCents / 100 / solUsd).toFixed(4) : null
 
   // Pay and generate — moderation runs BEFORE the wallet opens, so rejected
   // or over-limit text never costs the fan anything.
@@ -138,11 +152,20 @@ export default function FanPage() {
       const moderationSessionId =
         typeof modData.moderationSessionId === 'string' ? modData.moderationSessionId : null
 
+      // USD-primary: the SOL amount is the quote locked server-side at moderation
+      // time — the client never recomputes it from the (now derived) price.
+      const quotedLamports =
+        typeof modData.quote?.lamports === 'number' ? modData.quote.lamports : null
+      if (quotedLamports === null || quotedLamports <= 0) {
+        setError(t('fan.rateUnavailable'))
+        return
+      }
+
       // 2) On-chain payment — 90% creator, 10% platform fee. sendPaymentTransaction
       // attaches a priority fee + compute budget and confirms against blockhash
       // expiry (with one retry) so the tx survives mainnet congestion.
-      const platformFee = platformFeeLamports(totalLamports)
-      const creatorAmount = totalLamports - platformFee
+      const platformFee = platformFeeLamports(quotedLamports)
+      const creatorAmount = quotedLamports - platformFee
 
       const signature = await sendPaymentTransaction({
         publicKey,
@@ -277,7 +300,7 @@ export default function FanPage() {
                   <span
                     className="w-1.5 h-1.5 rounded-full bg-voclira-olive animate-pulse"
                   />
-                  {t('fan.pricePer150Chars', { price: pricePerUnit, unitChars: PRICING.UNIT_CHARS })}
+                  {t('fan.pricePer150Chars', { price: priceUsdLabel, unitChars: PRICING.UNIT_CHARS })}
                 </div>
               </div>
 
@@ -372,12 +395,23 @@ export default function FanPage() {
                     <div className="flex items-center gap-2 text-sm">
                       <span className="text-voclira-burgundy/60">
                         {charUnits > 0
-                          ? t('fan.priceUnitLabel', { units: charUnits, price: pricePerUnit })
-                          : t('fan.priceLabel', { price: pricePerUnit, unitChars: PRICING.UNIT_CHARS })}
+                          ? t('fan.priceUnitLabel', { units: charUnits, price: priceUsdLabel })
+                          : t('fan.priceLabel', { price: priceUsdLabel, unitChars: PRICING.UNIT_CHARS })}
                       </span>
                     </div>
-                    <div className="font-display font-bold text-base text-voclira-terracotta">
-                      {charUnits > 0 ? `= ${totalSol} SOL` : '—'}
+                    <div className="font-display font-bold text-base text-voclira-terracotta text-right">
+                      {charUnits > 0 ? (
+                        <>
+                          <div>= ${totalUsdLabel}</div>
+                          {approxSol && (
+                            <div className="text-xs font-normal text-voclira-burgundy/50">
+                              {t('fan.approxSol', { sol: approxSol })}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        '—'
+                      )}
                     </div>
                   </div>
 
@@ -396,7 +430,7 @@ export default function FanPage() {
                       </>
                     ) : (
                       <>
-                        {t('fan.payAndGenerate', { price: totalSol })}
+                        {t('fan.payAndGenerate', { price: totalUsdLabel })}
                       </>
                     )}
                   </motion.button>
