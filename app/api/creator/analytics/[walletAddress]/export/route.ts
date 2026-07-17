@@ -31,27 +31,33 @@ function toCsv(rows: Purchase[]): string {
   const header = [
     'date',
     'status',
+    'payment_method',
+    'currency',
     'buyer_wallet',
     'amount_sol',
     'platform_fee_sol',
     'net_sol',
+    'amount_usd',
     'play_count',
     'rejection_reason',
     'tx_signature',
   ].join(',')
 
   const body = rows.map((r) => {
-    // Card rows have null lamports (USD columns hold their value; Faz 7A adds them here).
     const gross = r.amount_lamports ?? 0
     const fee = r.platform_fee_lamports ?? 0
     const net = gross - fee
+    const amountUsd = r.amount_usd_cents != null ? (r.amount_usd_cents / 100).toFixed(2) : ''
     return [
       escapeCsv(r.created_at),
       escapeCsv(r.status),
+      escapeCsv(r.payment_method),
+      escapeCsv(r.currency),
       escapeCsv(r.buyer_wallet),
       escapeCsv(lamportsToSol(gross)),
       escapeCsv(lamportsToSol(fee)),
       escapeCsv(lamportsToSol(net)),
+      escapeCsv(amountUsd),
       escapeCsv(String(r.play_count)),
       escapeCsv(r.rejection_reason),
       escapeCsv(r.tx_signature),

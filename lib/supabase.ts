@@ -15,9 +15,13 @@ import type {
 } from '@/types'
 import { VocliraError, CreatorNotFoundError } from '@/lib/errors'
 
+// Server-side client. Prefer the service-role key (bypasses RLS) so that once RLS
+// is enabled deny-by-default on the tables, a leaked anon key can touch nothing
+// while these server routes keep full access. Falls back to the anon key for local
+// dev where the service-role key isn't set.
 const supabase = createClient(
   process.env.SUPABASE_URL ?? '',
-  process.env.SUPABASE_ANON_KEY ?? ''
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
 )
 
 function dbError(msg: string): never {
@@ -564,6 +568,8 @@ export async function getCreatorAnalytics(
   let totalGross = 0
   let totalNet = 0
   let totalFee = 0
+  let totalGrossUsd = 0
+  let totalNetUsd = 0
   let totalCompleted = 0
   let totalRejected = 0
   let totalRefunded = 0
@@ -578,26 +584,33 @@ export async function getCreatorAnalytics(
     const bucket = tsMap.get(date)
 
     if (row.status === 'completed') {
-      // Card rows have null lamports (their value lives in *_usd_cents; fiat analytics
-      // is Faz 7A). Coalesce to keep the SOL rollups correct for crypto rows.
-      const gross = row.amount_lamports ?? 0
-      const fee = row.platform_fee_lamports ?? 0
-      const net = gross - fee
-      totalGross += gross
-      totalNet += net
-      totalFee += fee
       totalCompleted += 1
       totalPlays += row.play_count
       if (row.buyer_wallet) {
         fanPurchaseCounts.set(row.buyer_wallet, (fanPurchaseCounts.get(row.buyer_wallet) ?? 0) + 1)
       }
-      priceSum += gross
-      priceCount += 1
-      if (bucket) {
-        bucket.gross_lamports += gross
-        bucket.net_lamports += net
-        bucket.messages += 1
+      // Split by currency: card earnings roll up in USD, crypto in SOL. This keeps
+      // the SOL avg/timeseries clean (card rows have null lamports).
+      if (row.payment_method === 'card') {
+        const grossUsd = row.amount_usd_cents ?? 0
+        const feeUsd = row.platform_fee_usd_cents ?? 0
+        totalGrossUsd += grossUsd
+        totalNetUsd += grossUsd - feeUsd
+      } else {
+        const gross = row.amount_lamports ?? 0
+        const fee = row.platform_fee_lamports ?? 0
+        const net = gross - fee
+        totalGross += gross
+        totalNet += net
+        totalFee += fee
+        priceSum += gross
+        priceCount += 1
+        if (bucket) {
+          bucket.gross_lamports += gross
+          bucket.net_lamports += net
+        }
       }
+      if (bucket) bucket.messages += 1
     } else if (row.status === 'rejected') {
       totalRejected += 1
       if (bucket) bucket.rejections += 1
@@ -612,6 +625,8 @@ export async function getCreatorAnalytics(
     total_gross_lamports: totalGross,
     total_net_lamports: totalNet,
     total_platform_fee_lamports: totalFee,
+    total_gross_usd_cents: totalGrossUsd,
+    total_net_usd_cents: totalNetUsd,
     total_messages: totalCompleted,
     total_completed: totalCompleted,
     total_rejected: totalRejected,
@@ -634,6 +649,8 @@ export async function getCreatorAnalytics(
     created_at: row.created_at,
     fan_text: row.fan_text,
     audio_url: row.audio_url,
+    payment_method: row.payment_method,
+    amount_usd_cents: row.amount_usd_cents,
   }))
 
   return {

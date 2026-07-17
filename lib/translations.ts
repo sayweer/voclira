@@ -141,6 +141,7 @@ export const translations = {
       statusRejected: 'Rejected',
       statusFailed: 'Failed',
       noText: 'No text',
+      cardPayment: 'Card',
       blockedBySafety: 'Blocked by safety filters.',
     },
     settings: {
@@ -185,6 +186,8 @@ export const translations = {
       completedSubtext: 'Per completed message',
       totalPlays: 'Total Plays',
       playsSubtext: 'Times play was pressed',
+      cardEarnings: 'Card Earnings',
+      cardEarningsSub: 'Net card sales (USD)',
       noActivity: 'No activity yet',
       noActivityDesc: 'No data for the last {days} days. Share your fan link to start receiving messages.',
       activityOverTime: 'Activity over time',
@@ -454,6 +457,7 @@ export const translations = {
       statusRejected: 'Reddedildi',
       statusFailed: 'Başarısız',
       noText: 'Metin yok',
+      cardPayment: 'Kart',
       blockedBySafety: 'Güvenlik filtrelerine takıldı.',
     },
     settings: {
@@ -498,6 +502,8 @@ export const translations = {
       completedSubtext: 'Başarılı mesaj başına',
       totalPlays: 'Toplam Oynatma',
       playsSubtext: 'Oynat butonuna basılma sayısı',
+      cardEarnings: 'Kart Geliri',
+      cardEarningsSub: 'Net kart satışları (USD)',
       noActivity: 'Henüz etkinlik yok',
       noActivityDesc: 'Son {days} güne ait veri yok. Mesaj almaya başlamak için takipçi linkinizi paylaşın.',
       activityOverTime: 'Zaman içindeki etkinlik',

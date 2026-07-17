@@ -225,3 +225,16 @@ BEGIN
     VALUES (p_wallet, v_id, 'payout_debit', -p_amount_usd_cents);
   RETURN v_id;
 END; $$;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Faz 7A — Row Level Security (deny-by-default).
+-- ⚠️  APPLY AT MAINNET CUTOVER, and ONLY AFTER SUPABASE_SERVICE_ROLE_KEY is set in
+--     the server env AND deployed. The server then uses the service-role key, which
+--     bypasses RLS; enabling RLS with NO policies means a leaked anon key can
+--     read/write nothing. Applying this while the server still runs on the anon key
+--     WILL break all access. (Idempotent — safe to run again.)
+-- ═══════════════════════════════════════════════════════════════════════════
+ALTER TABLE creators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE creator_ledger_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payout_requests ENABLE ROW LEVEL SECURITY;

@@ -145,7 +145,8 @@ Configure your `.env.local` (see [`.env.local.example`](.env.local.example)):
 | `R2_PUBLIC_URL` | Public domain/CDN fronting `R2_PUBLIC_BUCKET` | Cloudflare dashboard |
 | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ZONE_ID` | Optional — CDN purge on takedown | Cloudflare dashboard |
 | `SUPABASE_URL` | Supabase project URL | supabase.com dashboard |
-| `SUPABASE_ANON_KEY` | Supabase anon key | supabase.com dashboard |
+| `SUPABASE_ANON_KEY` | Supabase anon key (dev fallback) | supabase.com dashboard |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server key — bypasses RLS; **required before enabling RLS** (see `lib/schema.sql` Faz 7A) | Supabase → Project settings → API |
 | `SOLANA_RPC_URL` | Solana RPC endpoint (server-side, **required** — no fallback) | devnet: api.devnet.solana.com · mainnet: dedicated RPC (Helius/Triton) |
 | `NEXT_PUBLIC_SOLANA_RPC_URL` | Solana RPC endpoint (client-side; **required on mainnet-beta**) | devnet: api.devnet.solana.com · mainnet: dedicated RPC |
 | `NEXT_PUBLIC_SOLANA_NETWORK` | `devnet` or `mainnet-beta` | wallet adapter config |

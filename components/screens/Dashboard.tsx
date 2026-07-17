@@ -717,8 +717,13 @@ function MessageCard({
   onSeek,
 }: MessageCardProps) {
   const { t, language } = useLanguage()
-  const buyerTruncated = purchase.buyer_wallet.slice(0, 6) + '...' + purchase.buyer_wallet.slice(-6)
-  const amountSol = (purchase.amount_lamports / 1e9).toFixed(3)
+  const isCard = purchase.payment_method === 'card'
+  const buyerTruncated = isCard || !purchase.buyer_wallet
+    ? t('messageCard.cardPayment')
+    : purchase.buyer_wallet.slice(0, 6) + '...' + purchase.buyer_wallet.slice(-6)
+  const amountLabel = isCard
+    ? `$${((purchase.amount_usd_cents ?? 0) / 100).toFixed(2)}`
+    : `${(purchase.amount_lamports / 1e9).toFixed(3)} SOL`
 
   return (
     <Card className="bg-gradient-to-br from-card/90 to-card/50 backdrop-blur-md border-border/80 hover:border-ember-3/30 transition-all duration-300 shadow-md p-5 flex flex-col justify-between space-y-4 h-full">
@@ -750,7 +755,7 @@ function MessageCard({
       <div className="border-t border-border/40 pt-3 flex flex-col space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground flex items-center gap-1">
-            {t('messageCard.amount')} <strong className="text-foreground">{amountSol} SOL</strong>
+            {t('messageCard.amount')} <strong className="text-foreground">{amountLabel}</strong>
           </span>
           {purchase.play_count > 0 && (
             <span className="text-[10px] text-muted-foreground/80 flex items-center gap-1">

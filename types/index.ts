@@ -150,6 +150,9 @@ export interface AnalyticsSummary {
   total_gross_lamports: number
   total_net_lamports: number
   total_platform_fee_lamports: number
+  // Card (fiat) earnings for the period — net = gross − platform fee, in USD cents.
+  total_gross_usd_cents: number
+  total_net_usd_cents: number
   total_messages: number
   total_completed: number
   total_rejected: number
@@ -171,6 +174,9 @@ export interface RecentPurchaseRow {
   created_at: string
   fan_text?: string
   audio_url?: string | null
+  // Payment method + fiat amount so the UI can render card rows in USD.
+  payment_method: PaymentMethod
+  amount_usd_cents: number | null
 }
 
 export interface AnalyticsResponse {

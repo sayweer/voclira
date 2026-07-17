@@ -266,6 +266,14 @@ function SummaryCards({ data }: { data: AnalyticsResponse }) {
       value: String(s.total_plays),
       sub: t('analytics.playsSubtext'),
     },
+    // Card earnings appear automatically once there are card sales (net, USD).
+    ...(s.total_gross_usd_cents > 0
+      ? [{
+          label: t('analytics.cardEarnings'),
+          value: `$${(s.total_net_usd_cents / 100).toFixed(2)}`,
+          sub: t('analytics.cardEarningsSub'),
+        }]
+      : []),
   ]
 
   return (
