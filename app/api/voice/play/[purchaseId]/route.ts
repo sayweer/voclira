@@ -27,7 +27,9 @@ export async function POST(
   }
 
   const body = await safeParseJson<{ buyerWallet?: string }>(req)
-  if (body === null || !body.buyerWallet || !isValidWalletAddress(body.buyerWallet)) {
+  const buyerWallet = body?.buyerWallet
+  // A wallet is optional (card purchases have none); if present it must be valid.
+  if (buyerWallet !== undefined && !isValidWalletAddress(buyerWallet)) {
     return NextResponse.json(
       { success: false, error: 'Invalid buyer wallet' },
       { status: 400 }
@@ -43,7 +45,9 @@ export async function POST(
       )
     }
 
-    if (purchase.buyer_wallet !== body.buyerWallet) {
+    // Crypto purchases are wallet-bound — the caller must match. Card purchases have
+    // no wallet, so the play counter is best-effort (the ?purchaseId link is semi-public).
+    if (purchase.buyer_wallet !== null && purchase.buyer_wallet !== buyerWallet) {
       return NextResponse.json(
         { success: false, error: 'Buyer mismatch' },
         { status: 403 }

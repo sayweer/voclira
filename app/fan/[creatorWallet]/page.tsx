@@ -1,6 +1,6 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useState, useEffect, useRef } from 'react'
 import { MotionConfig, motion } from 'framer-motion'
 import { useWallet } from '@solana/wallet-adapter-react'
@@ -11,9 +11,12 @@ import LanguageToggle from '@/components/LanguageToggle'
 import { BrandLogo } from '@/components/BrandLogo'
 import { WavePath } from '@/components/ui/wave-path'
 import { downloadAudio, audioSrcFromStored } from '@/lib/audio-download'
-import { TEXT, PRICING, maxTextLengthFor, priceUnitsFor, platformFeeLamports } from '@/lib/limits'
+import { TEXT, PRICING, PRICING_USD, maxTextLengthFor, priceUnitsFor, platformFeeLamports } from '@/lib/limits'
 import { sendPaymentTransaction } from '@/lib/solana-client'
 import type { SupportedLanguage } from '@/types'
+
+const CARD_ENABLED = process.env.NEXT_PUBLIC_CARD_PAYMENTS_ENABLED === 'true'
+type ReturnStatus = 'verifying' | 'generating' | 'rejected' | 'expired' | 'cancelled' | 'timeout' | null
 
 interface Creator {
   wallet_address: string
@@ -50,6 +53,18 @@ export default function FanPage() {
   const [platformWallet, setPlatformWallet] = useState<string | null>(null)
   // Cosmetic display rate for "≈ SOL"; the actual charge is the server-locked quote.
   const [solUsd, setSolUsd] = useState<number | null>(null)
+
+  // Dual checkout: card is the default tab when enabled; crypto otherwise.
+  const searchParams = useSearchParams()
+  const returnPurchaseId = searchParams.get('purchaseId')
+  const cancelledFlag = searchParams.get('cancelled')
+  const isCardReturn = Boolean(returnPurchaseId) || cancelledFlag === '1'
+  const [checkoutTab, setCheckoutTab] = useState<'card' | 'crypto'>(CARD_ENABLED ? 'card' : 'crypto')
+  const [buyerEmail, setBuyerEmail] = useState('')
+  const [cardProcessing, setCardProcessing] = useState(false)
+  const [returnStatus, setReturnStatus] = useState<ReturnStatus>(
+    cancelledFlag === '1' ? 'cancelled' : returnPurchaseId ? 'verifying' : null
+  )
 
   // Fetch creator on mount
   useEffect(() => {
@@ -100,6 +115,73 @@ export default function FanPage() {
       .catch(() => {})
   }, [])
 
+  // Card checkout return: poll the purchase (2s × up to 60s) and trigger generation
+  // once it's paid. Shows verifying → generating → audio player (or rejected/expired).
+  useEffect(() => {
+    if (cancelledFlag === '1') return
+    if (!returnPurchaseId) return
+    let stopped = false
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+    const showAudio = (url: string) => {
+      setAudioUrl(audioSrcFromStored(url))
+      setAudioDownloadUrl(url)
+      setPurchaseId(returnPurchaseId)
+      setReturnStatus(null)
+    }
+    const run = async () => {
+      for (let i = 0; i < 30 && !stopped; i++) {
+        try {
+          const res = await fetch(`/api/purchase/${returnPurchaseId}`, { cache: 'no-store' })
+          if (res.ok) {
+            const data = await res.json()
+            if (data.status === 'completed' && data.audioUrl) {
+              showAudio(data.audioUrl)
+              return
+            }
+            if (data.status === 'rejected' || data.status === 'failed') {
+              setReturnStatus('rejected')
+              return
+            }
+            if (data.status === 'expired') {
+              setReturnStatus('expired')
+              return
+            }
+            if (data.status === 'paid') {
+              setReturnStatus('generating')
+              const gen = await fetch('/api/voice/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ purchaseId: returnPurchaseId }),
+              })
+              const genData = await gen.json()
+              if (gen.ok && typeof genData.audioUrl === 'string') {
+                showAudio(genData.audioUrl)
+                return
+              }
+              if (gen.status === 422 || genData.refundNeeded) {
+                setReturnStatus('rejected')
+                return
+              }
+              // 409 IN_PROGRESS / transient → keep polling
+            } else if (data.status === 'pending') {
+              setReturnStatus('generating')
+            }
+            // pending_payment → keep verifying
+          }
+        } catch {
+          /* keep polling */
+        }
+        if (!stopped) await sleep(2000)
+      }
+      if (!stopped) setReturnStatus((s) => (s === 'generating' ? s : 'timeout'))
+    }
+    run()
+    return () => {
+      stopped = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnPurchaseId, cancelledFlag])
+
   // Language-dependent limits + USD-primary price display — single source: lib/limits.ts
   const maxLen = maxTextLengthFor(selectedLanguage)
   const overLimit = message.length > maxLen
@@ -111,6 +193,11 @@ export default function FanPage() {
   const totalUsdLabel = (totalUsdCents / 100).toFixed(2)
   const approxSol =
     solUsd && totalUsdCents > 0 ? (totalUsdCents / 100 / solUsd).toFixed(4) : null
+
+  // Card total: message price + a flat, transparent processing fee.
+  const processingFeeLabel = (PRICING_USD.CARD_PROCESSING_FEE_USD_CENTS / 100).toFixed(2)
+  const cardTotalUsdCents = totalUsdCents + PRICING_USD.CARD_PROCESSING_FEE_USD_CENTS
+  const cardTotalLabel = (cardTotalUsdCents / 100).toFixed(2)
 
   // Pay and generate — moderation runs BEFORE the wallet opens, so rejected
   // or over-limit text never costs the fan anything.
@@ -222,6 +309,55 @@ export default function FanPage() {
     }
   }
 
+  // Card checkout: moderation (card) → Stripe session → redirect. No wallet involved;
+  // the fan returns to ?purchaseId and the polling effect finishes the flow.
+  const handleCardCheckout = async () => {
+    if (!creator || !message.trim() || tooShort || overLimit) return
+    setCardProcessing(true)
+    setError(null)
+    try {
+      const modRes = await fetch('/api/moderate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatorWallet,
+          text: message,
+          language: selectedLanguage,
+          paymentMethod: 'card',
+        }),
+      })
+      const modData = await modRes.json()
+      if (!modRes.ok) {
+        setError(
+          modData.code === 'UNSAFE_CONTENT' ? t('fan.contentRejected') : modData.error ?? t('fan.generationFailed')
+        )
+        return
+      }
+
+      const coRes = await fetch('/api/checkout/card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creatorWallet,
+          text: message,
+          language: selectedLanguage,
+          moderationSessionId: modData.moderationSessionId,
+          ...(buyerEmail.trim() ? { buyerEmail: buyerEmail.trim() } : {}),
+        }),
+      })
+      const coData = await coRes.json()
+      if (coRes.ok && typeof coData.url === 'string') {
+        window.location.href = coData.url
+        return
+      }
+      setError(coData.error ?? t('fan.generationFailed'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('fan.paymentFailed'))
+    } finally {
+      setCardProcessing(false)
+    }
+  }
+
   const handleDownload = async () => {
     if (!audioDownloadUrl) return
     setDownloadHint(null)
@@ -304,7 +440,34 @@ export default function FanPage() {
                 </div>
               </div>
 
-              {/* Message form — textarea always visible (composing does not require wallet) */}
+              {/* Card checkout result — status banner until the audio player appears */}
+              {isCardReturn && !audioUrl && (
+                <div className="rounded-2xl border-2 border-voclira-burgundy/25 bg-voclira-paper p-8 flex flex-col items-center gap-4 text-center">
+                  {(returnStatus === 'verifying' || returnStatus === 'generating') && (
+                    <div className="w-8 h-8 rounded-full border-2 border-voclira-burgundy border-t-transparent animate-spin" />
+                  )}
+                  <p className="text-sm text-voclira-burgundy">
+                    {returnStatus === 'verifying' && t('fan.verifyingPayment')}
+                    {returnStatus === 'generating' && t('fan.generatingVoice')}
+                    {returnStatus === 'rejected' && t('fan.rejectedRefunded')}
+                    {returnStatus === 'expired' && t('fan.paymentExpired')}
+                    {returnStatus === 'cancelled' && t('fan.checkoutCancelled')}
+                    {returnStatus === 'timeout' && t('fan.pollingTimeout')}
+                  </p>
+                  {(returnStatus === 'timeout' || returnStatus === 'cancelled') && returnPurchaseId && (
+                    <a
+                      href={`/play/${returnPurchaseId}`}
+                      className="text-xs font-semibold text-voclira-terracotta underline"
+                    >
+                      {t('fan.openStatusLink')}
+                    </a>
+                  )}
+                  {error && <p className="text-xs text-red-600">{error}</p>}
+                </div>
+              )}
+
+              {/* Composer — hidden while a card-checkout result is showing */}
+              {!isCardReturn && (
               <div className="flex flex-col gap-4">
 
                 {/* Textarea */}
@@ -370,6 +533,84 @@ export default function FanPage() {
 
                 <WavePath className="my-3 text-voclira-burgundy/40" />
 
+                {/* Checkout tabs — only when card payments are enabled */}
+                {CARD_ENABLED && (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutTab('card')}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition-all ${
+                        checkoutTab === 'card'
+                          ? 'border-voclira-burgundy bg-voclira-burgundy text-voclira-cream'
+                          : 'border-voclira-burgundy/20 bg-voclira-paper text-voclira-burgundy/70 hover:border-voclira-burgundy/40'
+                      }`}
+                    >
+                      💳 {t('fan.payWithCard')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutTab('crypto')}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold transition-all ${
+                        checkoutTab === 'crypto'
+                          ? 'border-voclira-burgundy bg-voclira-burgundy text-voclira-cream'
+                          : 'border-voclira-burgundy/20 bg-voclira-paper text-voclira-burgundy/70 hover:border-voclira-burgundy/40'
+                      }`}
+                    >
+                      ◎ {t('fan.payWithSol')}
+                    </button>
+                  </div>
+                )}
+
+                {checkoutTab === 'card' ? (
+                  <div className="flex flex-col gap-3">
+                    {/* Optional receipt / recovery email */}
+                    <div className="flex flex-col gap-1">
+                      <label className="font-display text-xs font-medium text-voclira-burgundy/60 uppercase tracking-[0.25em]">
+                        {t('fan.emailOptionalLabel')}
+                      </label>
+                      <input
+                        type="email"
+                        value={buyerEmail}
+                        onChange={(e) => setBuyerEmail(e.target.value)}
+                        placeholder={t('fan.emailHint')}
+                        disabled={cardProcessing}
+                        className="w-full rounded-xl border border-voclira-burgundy/20 bg-voclira-paper px-4 py-2.5 text-sm text-voclira-night placeholder:text-voclira-burgundy/40 outline-none focus:border-voclira-burgundy/40 disabled:opacity-60"
+                      />
+                    </div>
+
+                    {/* Transparent total: message price + flat processing fee */}
+                    <div className="rounded-xl border border-voclira-terracotta/40 bg-voclira-terracotta/10 px-4 py-3 text-sm text-voclira-burgundy/80">
+                      {charUnits > 0
+                        ? t('fan.processingFeeLine', { msg: totalUsdLabel, fee: processingFeeLabel, total: cardTotalLabel })
+                        : t('fan.priceLabel', { price: priceUsdLabel, unitChars: PRICING.UNIT_CHARS })}
+                    </div>
+
+                    <motion.button
+                      type="button"
+                      onClick={handleCardCheckout}
+                      disabled={!message.trim() || tooShort || overLimit || cardProcessing}
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full rounded-xl py-3.5 px-6 font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 bg-voclira-burgundy text-voclira-cream shadow-[0_4px_20px_rgba(123,37,37,0.35)] hover:bg-voclira-burgundy/90 disabled:bg-voclira-burgundy/30 disabled:shadow-none disabled:cursor-not-allowed"
+                    >
+                      {cardProcessing ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-voclira-cream/40 border-t-voclira-cream rounded-full animate-spin" />
+                          {t('fan.processingPayment')}
+                        </>
+                      ) : (
+                        t('fan.cardPayButton', { total: cardTotalLabel })
+                      )}
+                    </motion.button>
+
+                    {error && (
+                      <div className="rounded-xl px-4 py-3 text-sm flex items-start gap-2 bg-red-600/10 border border-red-600/30 text-red-700">
+                        <span className="mt-0.5 flex-shrink-0">⚠️</span>
+                        <span>{error}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
                 {/* Wallet prompt — shown when not connected */}
                 {!connected && (
                   <div className="rounded-2xl border-2 border-voclira-burgundy/25 bg-voclira-paper p-8 flex flex-col items-center gap-5 text-center">
@@ -450,57 +691,61 @@ export default function FanPage() {
                     </p>
                   )}
 
-                  {/* Audio player */}
-                  {audioUrl && (
-                    <motion.div
-                      className="rounded-2xl border-2 border-voclira-burgundy/25 bg-voclira-paper shadow-[0_8px_30px_rgba(123,37,37,0.12)] p-5 flex flex-col gap-3"
-                      initial={{ opacity: 0, scale: 0.95, y: 12 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">🎉</span>
-                        <p className="font-semibold text-voclira-burgundy text-sm">
-                          {t('fan.voiceReady')}
-                        </p>
-                      </div>
-                      <p className="text-[10px] uppercase tracking-wider text-voclira-burgundy/50">
-                        {t('fan.aiGenerated')}
-                      </p>
-                      <audio
-                        controls
-                        playsInline
-                        src={audioUrl}
-                        className="w-full mt-1 accent-voclira-terracotta"
-                        onPlay={() => {
-                          if (!purchaseId || !publicKey) return
-                          fetch(`/api/voice/play/${purchaseId}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ buyerWallet: publicKey.toBase58() }),
-                          }).catch(() => {
-                            /* play tracking is best-effort */
-                          })
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleDownload}
-                        disabled={!audioDownloadUrl}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 bg-voclira-terracotta/15 border border-voclira-terracotta/40 text-voclira-burgundy hover:bg-voclira-terracotta/25 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {t('fan.downloadAudio')}
-                      </button>
-                      {downloadHint && (
-                        <p className="text-xs text-voclira-burgundy/60 mt-1 leading-snug">
-                          {downloadHint}
-                        </p>
-                      )}
-                    </motion.div>
-                  )}
+                  </>
+                )}
                   </>
                 )}
               </div>
+              )}
+
+              {/* Audio player — shared across the card + crypto flows */}
+              {audioUrl && (
+                <motion.div
+                  className="rounded-2xl border-2 border-voclira-burgundy/25 bg-voclira-paper shadow-[0_8px_30px_rgba(123,37,37,0.12)] p-5 flex flex-col gap-3"
+                  initial={{ opacity: 0, scale: 0.95, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🎉</span>
+                    <p className="font-semibold text-voclira-burgundy text-sm">
+                      {t('fan.voiceReady')}
+                    </p>
+                  </div>
+                  <p className="text-[10px] uppercase tracking-wider text-voclira-burgundy/50">
+                    {t('fan.aiGenerated')}
+                  </p>
+                  <audio
+                    controls
+                    playsInline
+                    src={audioUrl}
+                    className="w-full mt-1 accent-voclira-terracotta"
+                    onPlay={() => {
+                      if (!purchaseId) return
+                      fetch(`/api/voice/play/${purchaseId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(publicKey ? { buyerWallet: publicKey.toBase58() } : {}),
+                      }).catch(() => {
+                        /* play tracking is best-effort */
+                      })
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    disabled={!audioDownloadUrl}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 bg-voclira-terracotta/15 border border-voclira-terracotta/40 text-voclira-burgundy hover:bg-voclira-terracotta/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {t('fan.downloadAudio')}
+                  </button>
+                  {downloadHint && (
+                    <p className="text-xs text-voclira-burgundy/60 mt-1 leading-snug">
+                      {downloadHint}
+                    </p>
+                  )}
+                </motion.div>
+              )}
 
             </div>
           )}
