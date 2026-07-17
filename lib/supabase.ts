@@ -9,6 +9,9 @@ import type {
   PurchaseStatus,
   RecentPurchaseRow,
   RefundStatus,
+  PayoutMethod,
+  PayoutRequest,
+  BankDetails,
 } from '@/types'
 import { VocliraError, CreatorNotFoundError } from '@/lib/errors'
 
@@ -412,6 +415,53 @@ export async function updatePurchaseRefund(
 
   const { error } = await supabase.from('purchases').update(payload).eq('id', id)
   if (error) dbError(`DB error: ${error.message}`)
+}
+
+/** Creator's withdrawable card-earnings balance (ledger sum, USD cents). */
+export async function getCreatorFiatBalance(walletAddress: string): Promise<number> {
+  const { data, error } = await supabase.rpc('get_creator_fiat_balance', { p_wallet: walletAddress })
+  if (error) dbError(`DB error: ${error.message}`)
+  return typeof data === 'number' ? data : Number(data ?? 0)
+}
+
+/**
+ * Reserve a payout atomically (request_payout SQL fn: balance check + request +
+ * payout_debit under a row lock). Throws INSUFFICIENT_BALANCE (400) if underfunded.
+ */
+export async function requestPayout(params: {
+  walletAddress: string
+  amountUsdCents: number
+  method: PayoutMethod
+  destWallet: string | null
+  bankDetails: BankDetails | null
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('request_payout', {
+    p_wallet: params.walletAddress,
+    p_amount_usd_cents: params.amountUsdCents,
+    p_method: params.method,
+    p_dest_wallet: params.destWallet,
+    p_dest_bank_details: params.bankDetails,
+  })
+
+  if (error) {
+    if (error.message?.includes('INSUFFICIENT_BALANCE')) {
+      throw new VocliraError('Insufficient balance for this payout', 'INSUFFICIENT_BALANCE', 400)
+    }
+    dbError(`DB error: ${error.message}`)
+  }
+  return data as string
+}
+
+export async function listPayoutRequests(walletAddress: string): Promise<PayoutRequest[]> {
+  const { data, error } = await supabase
+    .from('payout_requests')
+    .select('*')
+    .eq('creator_wallet', walletAddress)
+    .order('requested_at', { ascending: false })
+    .limit(50)
+
+  if (error) dbError(`DB error: ${error.message}`)
+  return (data as PayoutRequest[]) ?? []
 }
 
 export async function getCreatorStats(

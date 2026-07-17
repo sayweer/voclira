@@ -88,6 +88,51 @@ export type PurchaseStatus =
   | 'rejected'
   | 'expired'
 
+// ─── Creator ledger + payout (fiat earnings) ───────────
+
+export type PayoutMethod = 'sol_transfer' | 'bank_transfer'
+
+export type PayoutStatus =
+  | 'requested'
+  | 'approved'
+  | 'processing'
+  | 'paid'
+  | 'failed'
+  | 'cancelled'
+
+export interface BankDetails {
+  iban: string
+  accountHolder: string
+}
+
+export interface PayoutRequest {
+  id: string
+  creator_wallet: string
+  amount_usd_cents: number
+  method: PayoutMethod
+  status: PayoutStatus
+  dest_wallet: string | null
+  dest_bank_details: BankDetails | null
+  sol_rate_usd: number | null
+  sol_amount_lamports: number | null
+  payout_tx_signature: string | null
+  admin_note: string | null
+  requested_at: string
+  processed_at: string | null
+}
+
+export type LedgerEntryType = 'sale_credit' | 'refund_debit' | 'payout_debit' | 'adjustment'
+
+export interface LedgerEntry {
+  id: string
+  creator_wallet: string
+  purchase_id: string | null
+  payout_request_id: string | null
+  entry_type: LedgerEntryType
+  amount_usd_cents: number
+  created_at: string
+}
+
 // ─── Analytics ─────────────────────────────────────────
 
 export type AnalyticsRangeDays = 7 | 30 | 90

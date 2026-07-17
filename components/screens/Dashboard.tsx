@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card';
 import { BorderBeam } from '@/components/ui/border-beam';
 import { Dock } from '@/components/ui/dock-two';
 import { BrandLogo } from '@/components/BrandLogo';
+import PayoutPanel from '@/components/PayoutPanel';
 import {
   Copy,
   Check,
@@ -450,6 +451,11 @@ export default function Dashboard({
                 {t('dashboard.shareTextDesc')}
               </p>
             </Card>
+
+            {/* Card-earnings payout — only when card payments are live (Faz 7B). */}
+            {process.env.NEXT_PUBLIC_CARD_PAYMENTS_ENABLED === 'true' && (
+              <PayoutPanel walletAddress={walletAddress} getAuthHeaders={getAuthHeaders} />
+            )}
           </>
         )}
 

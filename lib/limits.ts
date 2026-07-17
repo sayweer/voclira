@@ -57,6 +57,11 @@ export const PRICING_USD = {
   CARD_PROCESSING_FEE_USD_CENTS: 40,
 } as const
 
+export const PAYOUT = {
+  /** Minimum card-earnings balance a creator can withdraw. */
+  MIN_USD_CENTS: 1000, // $10
+} as const
+
 export const QUOTE = {
   /** Quote validity — same window as the moderation session. */
   TTL_SECONDS: 600,
