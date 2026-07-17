@@ -41,6 +41,16 @@ export const PRICING = {
   SOL_USD_FALLBACK: 150,
 } as const
 
+// On-chain transaction tuning for the fan payment (two SystemProgram transfers).
+// Attached client-side in sendPaymentTransaction() so the tx survives mainnet
+// congestion instead of silently expiring like the current fire-and-forget send.
+export const TX = {
+  /** Two transfers need ~450 compute units; 20k is generous headroom. */
+  COMPUTE_UNIT_LIMIT: 20_000,
+  /** Priority fee per compute unit. 20k CU × 100k µLamports ≈ 2,000 lamports (~0.000002 SOL). */
+  PRIORITY_FEE_MICROLAMPORTS: 100_000,
+} as const
+
 // Reference samples are converted client-side to 24kHz mono 16-bit WAV (lib/audio-wav.ts),
 // so byte size ≈ duration × 48,000 + 44-byte header. Server-side sanity bounds:
 const WAV_BYTES_PER_SECOND = 24_000 * 2

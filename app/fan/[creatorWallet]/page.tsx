@@ -5,13 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { MotionConfig, motion } from 'framer-motion'
 import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/WalletButton'
-import {
-  Connection,
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  LAMPORTS_PER_SOL,
-} from '@solana/web3.js'
+import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { Mic } from 'lucide-react'
 import { useLanguage } from '@/components/LanguageProvider'
 import LanguageToggle from '@/components/LanguageToggle'
@@ -19,6 +13,7 @@ import { BrandLogo } from '@/components/BrandLogo'
 import { WavePath } from '@/components/ui/wave-path'
 import { downloadAudio, audioSrcFromStored } from '@/lib/audio-download'
 import { TEXT, PRICING, maxTextLengthFor, priceUnitsFor, platformFeeLamports } from '@/lib/limits'
+import { sendPaymentTransaction } from '@/lib/solana-client'
 import type { SupportedLanguage } from '@/types'
 
 interface Creator {
@@ -143,40 +138,21 @@ export default function FanPage() {
       const moderationSessionId =
         typeof modData.moderationSessionId === 'string' ? modData.moderationSessionId : null
 
-      // 2) On-chain payment
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com',
-        'confirmed'
-      )
-
-      // Split payment: 90% to creator, 10% platform fee
+      // 2) On-chain payment — 90% creator, 10% platform fee. sendPaymentTransaction
+      // attaches a priority fee + compute budget and confirms against blockhash
+      // expiry (with one retry) so the tx survives mainnet congestion.
       const platformFee = platformFeeLamports(totalLamports)
       const creatorAmount = totalLamports - platformFee
 
-      // Build transaction with two transfers
-      const transaction = new Transaction()
-      transaction.add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: new PublicKey(creatorWallet),
-          lamports: creatorAmount,
-        }),
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: new PublicKey(platformWallet),
-          lamports: platformFee,
-        })
-      )
-      transaction.feePayer = publicKey
-      const { blockhash } = await connection.getLatestBlockhash()
-      transaction.recentBlockhash = blockhash
-
-      // Send transaction via Phantom
-      const signature = await sendTransaction(transaction, connection)
+      const signature = await sendPaymentTransaction({
+        publicKey,
+        sendTransaction,
+        transfers: [
+          { to: creatorWallet, lamports: creatorAmount },
+          { to: platformWallet, lamports: platformFee },
+        ],
+      })
       setTxSignature(signature)
-
-      // Wait for confirmation
-      await connection.confirmTransaction(signature, 'confirmed')
 
       // 3) Generate. If the one-time moderation session was already consumed
       // (e.g. an earlier attempt), retry once WITHOUT it — generate re-moderates anyway.

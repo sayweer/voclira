@@ -3,6 +3,7 @@ import { mplCore, create } from '@metaplex-foundation/mpl-core'
 import { walletAdapterIdentity, type WalletAdapter } from '@metaplex-foundation/umi-signer-wallet-adapters'
 import { generateSigner, publicKey as toUmiPublicKey } from '@metaplex-foundation/umi'
 import { base58 } from '@metaplex-foundation/umi/serializers'
+import { resolveClientRpcUrl } from '@/lib/solana-client'
 
 export interface MintLicenseResult {
   nftMint: string
@@ -24,7 +25,7 @@ export async function mintVoiceLicense(
   wallet: WalletAdapter,
   walletAddress: string
 ): Promise<MintLicenseResult> {
-  const rpc = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com'
+  const rpc = resolveClientRpcUrl()
 
   // Reuse the existing public config endpoint (same source the fan page uses)
   // instead of a separate NEXT_PUBLIC env var.

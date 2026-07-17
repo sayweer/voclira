@@ -1,11 +1,18 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { TransactionVerificationError, VocliraError } from '@/lib/errors'
 import { platformFeeLamports } from '@/lib/limits'
+import { requireServerEnv } from '@/lib/env'
 
-const connection = new Connection(
-  process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com',
-  'confirmed'
-)
+// Lazy singleton — resolving SOLANA_RPC_URL at first use (not module load) keeps
+// a missing var from crashing the build, while still failing loudly at runtime
+// instead of silently falling back to devnet in production.
+let _connection: Connection | null = null
+function getConnection(): Connection {
+  if (!_connection) {
+    _connection = new Connection(requireServerEnv('SOLANA_RPC_URL'), 'confirmed')
+  }
+  return _connection
+}
 
 export async function verifyTransaction(
   txSignature: string,
@@ -23,7 +30,7 @@ export async function verifyTransaction(
   const platformFee = platformFeeLamports(expectedTotalLamports)
   const creatorAmount = expectedTotalLamports - platformFee
 
-  const tx = await connection.getTransaction(txSignature, {
+  const tx = await getConnection().getTransaction(txSignature, {
     maxSupportedTransactionVersion: 0,
   })
 
@@ -109,7 +116,7 @@ export async function verifyLicenseMint(
   nftMint: string,
   signerWallet: string
 ): Promise<boolean> {
-  const tx = await connection.getTransaction(txSignature, {
+  const tx = await getConnection().getTransaction(txSignature, {
     maxSupportedTransactionVersion: 0,
   })
 
@@ -141,7 +148,7 @@ export async function verifyLicenseMint(
 
 export async function getWalletBalance(walletAddress: string): Promise<number> {
   try {
-    const balance = await connection.getBalance(new PublicKey(walletAddress))
+    const balance = await getConnection().getBalance(new PublicKey(walletAddress))
     return balance / LAMPORTS_PER_SOL
   } catch {
     throw new VocliraError('Failed to fetch wallet balance', 'WALLET_ERROR', 500)

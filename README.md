@@ -146,8 +146,8 @@ Configure your `.env.local` (see [`.env.local.example`](.env.local.example)):
 | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ZONE_ID` | Optional — CDN purge on takedown | Cloudflare dashboard |
 | `SUPABASE_URL` | Supabase project URL | supabase.com dashboard |
 | `SUPABASE_ANON_KEY` | Supabase anon key | supabase.com dashboard |
-| `SOLANA_RPC_URL` | Solana devnet RPC endpoint | api.devnet.solana.com |
-| `NEXT_PUBLIC_SOLANA_RPC_URL` | Solana RPC endpoint (client-side) | api.devnet.solana.com |
+| `SOLANA_RPC_URL` | Solana RPC endpoint (server-side, **required** — no fallback) | devnet: api.devnet.solana.com · mainnet: dedicated RPC (Helius/Triton) |
+| `NEXT_PUBLIC_SOLANA_RPC_URL` | Solana RPC endpoint (client-side; **required on mainnet-beta**) | devnet: api.devnet.solana.com · mainnet: dedicated RPC |
 | `NEXT_PUBLIC_SOLANA_NETWORK` | `devnet` or `mainnet-beta` | wallet adapter config |
 | `PLATFORM_WALLET` | Platform fee wallet address | Phantom wallet |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL | console.upstash.com |

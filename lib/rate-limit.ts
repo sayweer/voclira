@@ -75,10 +75,16 @@ function getRatelimitInstance(maxRequests: number, windowMs: number): Ratelimit 
   return instance
 }
 
+// In-memory rate limiting is per-instance, so it does nothing on Vercel's
+// isolated serverless invocations. In production Redis is mandatory: if it's
+// unconfigured or a call fails, fail CLOSED (deny) rather than silently letting
+// unlimited traffic through. Locally we keep the in-memory fallback for dev UX.
+const isProduction = process.env.NODE_ENV === 'production'
+
 /**
  * Check if a request is within the rate limit.
- * Falls back gracefully to in-memory rate limiting if Upstash Redis is unavailable.
- * @returns true if the request is allowed, false if rate-limited.
+ * @returns true if the request is allowed, false if rate-limited (or, in
+ * production, if Redis is unavailable — fail-closed).
  */
 export async function checkRateLimit(
   ip: string,
@@ -95,8 +101,12 @@ export async function checkRateLimit(
         return success
       }
     } catch (e) {
-      console.warn('[RateLimit] Upstash rate limiting failed, falling back to in-memory:', e)
+      console.error('[RateLimit] Upstash rate limiting failed:', e)
+      if (isProduction) return false // fail closed — in-memory is useless on serverless
     }
+  } else if (isProduction) {
+    console.error('[RateLimit] Redis not configured in production — failing closed')
+    return false
   }
 
   return checkRateLimitInMemory(ip, maxRequests, windowMs)
